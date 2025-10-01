@@ -2,10 +2,10 @@
 from collections.abc import Iterable
 from uuid import UUID
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile
 
-from ...models.documents import DocumentCreateResponse, DocumentMetadata, DocumentProcessingStatus
-from ...services.pipeline import DocumentPipeline
+from ...models.documents import DocumentCreateResponse, DocumentMetadata
+from ...services.pipeline import DocumentNotFoundError, DocumentPipeline
 
 router = APIRouter()
 
@@ -28,11 +28,17 @@ async def list_documents() -> Iterable[DocumentMetadata]:
 @router.get("/{document_id}", summary="Get metadata for a document", response_model=DocumentMetadata)
 async def get_document(document_id: UUID) -> DocumentMetadata:
     """Fetch stored metadata for an individual document."""
-    return pipeline.metadata_store.get_document(document_id)
+    try:
+        return pipeline.metadata_store.get_document(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
 
 
 @router.get("/{document_id}/qa", summary="Ask a question about a document")
 async def ask_question(document_id: UUID, question: str) -> dict[str, str]:
     """Provide a lightweight placeholder for document Q&A functionality."""
-    answer = await pipeline.answer_question(document_id=document_id, question=question)
+    try:
+        answer = await pipeline.answer_question(document_id=document_id, question=question)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
     return {"answer": answer}
