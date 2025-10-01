@@ -22,14 +22,14 @@ async def upload_document(file: UploadFile) -> DocumentCreateResponse:
 @router.get("/", summary="List processed documents", response_model=list[DocumentMetadata])
 async def list_documents() -> Iterable[DocumentMetadata]:
     """Return metadata for all processed documents in the local store."""
-    return pipeline.metadata_store.list_documents()
+    return pipeline.iter_documents()
 
 
 @router.get("/{document_id}", summary="Get metadata for a document", response_model=DocumentMetadata)
 async def get_document(document_id: UUID) -> DocumentMetadata:
     """Fetch stored metadata for an individual document."""
     try:
-        return pipeline.metadata_store.get_document(document_id)
+        return pipeline.get_document(document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
 
