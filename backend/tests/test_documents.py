@@ -1,7 +1,9 @@
 """Integration tests for document API endpoints."""
 from __future__ import annotations
 
+import asyncio
 import importlib
+import time
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -52,7 +54,7 @@ def test_upload_persists_file(client_and_modules):
 
     from app.core.config import get_settings
 
-    metadata = documents_module.pipeline.metadata_store.get_document(document_id)
+    metadata = documents_module.pipeline.get_document(document_id)
     assert metadata.source_path is not None
     assert metadata.source_path.exists()
     assert metadata.source_path.read_bytes() == payload
@@ -62,3 +64,61 @@ def test_upload_persists_file(client_and_modules):
     assert Path(settings.data_dir) in metadata.source_path.parents
     assert metadata.source_path.parent.name == "raw"
     assert metadata.source_path.parent.parent.name == str(document_id)
+
+
+def _wait_for_status(client: TestClient, document_id: UUID, expected: str, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        response = client.get(f"/documents/{document_id}")
+        data = response.json()
+        if data["status"] == expected:
+            return data
+        time.sleep(0.05)
+    raise AssertionError(f"Document {document_id} did not reach status {expected} within timeout")
+
+
+def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
+    client, documents_module = client_and_modules
+    payload = (
+        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
+        "Art. 2. Kara umowna wynosi 5000 zł.\n"
+        "Kontakt: biuro@example.com."
+    ).encode()
+    response = client.post("/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
+
+    document_id = UUID(response.json()["document_id"])
+    data = _wait_for_status(client, document_id, "ready")
+
+    assert data["summary"] is not None
+    assert any("termin" in item.lower() for item in data["deadlines"])
+    assert any("kara" in item.lower() for item in data["penalties"])
+    assert "EMAIL" in " ".join(data["pii_entities"].keys()).upper()
+
+    qa_response = client.get(
+        f"/documents/{document_id}/qa",
+        params={"question": "Jaka kara grozi za naruszenie?"},
+    )
+    answer = qa_response.json()["answer"]
+    assert "Źródła" in answer
+
+
+def test_repository_survives_restart(client_and_modules):
+    client, documents_module = client_and_modules
+    payload = "Art. 1. Strony zobowiązują się do zachowania poufności.".encode("utf-8")
+    response = client.post("/documents/", files={"file": ("umowa.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    metadata = documents_module.pipeline.get_document(document_id)
+    assert metadata.sanitized_path and metadata.sanitized_path.exists()
+
+    # Simulate application restart by creating a fresh pipeline instance
+    from app.services.pipeline import DocumentPipeline
+
+    new_pipeline = DocumentPipeline()
+    restored = new_pipeline.get_document(document_id)
+    assert restored.status == metadata.status
+    assert restored.summary == metadata.summary
+
+    answer = asyncio.run(new_pipeline.answer_question(document_id, "Jakie są obowiązki stron?"))
+    assert "obowiąz" in answer.lower()
