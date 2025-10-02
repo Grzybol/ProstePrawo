@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 from collections import Counter
 from typing import Iterable
 from uuid import UUID
@@ -17,6 +18,9 @@ class RetrievedChunk:
     identifier: str
     score: float
     text: str
+
+
+_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 
 class SimpleIndexer:
@@ -66,4 +70,4 @@ class SimpleIndexer:
 
 
 def _tokenize(text: str) -> list[str]:
-    return [token.lower() for token in text.split() if token]
+    return [token.lower() for token in _TOKEN_PATTERN.findall(text)]

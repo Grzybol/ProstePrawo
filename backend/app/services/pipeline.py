@@ -13,7 +13,7 @@ from fastapi import UploadFile
 from ..core.config import get_settings
 from ..models.documents import DocumentMetadata, DocumentProcessingStatus
 from ..repositories import DocumentRepository
-from . import inference, ingestion, indexing, sanitizer
+from . import exporter, inference, ingestion, indexing, sanitizer
 
 
 class DocumentNotFoundError(KeyError):
@@ -21,6 +21,15 @@ class DocumentNotFoundError(KeyError):
 
     def __init__(self, document_id: UUID) -> None:
         message = f"Document with id {document_id} was not found"
+        super().__init__(message)
+        self.document_id = document_id
+
+
+class DocumentNotReadyError(RuntimeError):
+    """Raised when an operation requires a fully processed document."""
+
+    def __init__(self, document_id: UUID) -> None:
+        message = f"Document with id {document_id} is not ready"
         super().__init__(message)
         self.document_id = document_id
 
@@ -42,7 +51,12 @@ class DocumentPipeline:
         metadata = DocumentMetadata(title=file.filename or "unknown")
         await self._persist_upload(file, metadata)
         self.repository.upsert(metadata)
-        asyncio.create_task(self._run_pipeline(metadata.document_id))
+        loop = asyncio.get_running_loop()
+
+        def _runner() -> None:
+            asyncio.run(self._run_pipeline(metadata.document_id))
+
+        loop.run_in_executor(None, _runner)
         return metadata
 
     async def _run_pipeline(self, document_id: UUID) -> None:
@@ -100,11 +114,27 @@ class DocumentPipeline:
         if metadata.status != DocumentProcessingStatus.READY:
             return "Dokument jest nadal przetwarzany. Spróbuj ponownie później."
         retrieved = await asyncio.to_thread(self._indexer.retrieve, document_id, question, 3)
+        if not retrieved and metadata.obligations:
+            obligations = "; ".join(metadata.obligations[:3])
+            return (
+                "Na podstawie zapisanych obowiązków dokument wskazuje: "
+                f"{obligations}"
+            )
         answer = inference.answer_question(question, retrieved)
         if answer.sources:
             sources = ", ".join(answer.sources)
             return f"{answer.content} Źródła: {sources}."
         return answer.content
+
+    async def export_document(self, document_id: UUID, format: str = "markdown") -> str:
+        """Generate an export artefact for ``document_id`` in the given ``format``."""
+
+        metadata = self._get(document_id)
+        if metadata.status != DocumentProcessingStatus.READY:
+            raise DocumentNotReadyError(document_id)
+        if format.lower() != "markdown":
+            raise ValueError(f"Unsupported export format: {format}")
+        return await asyncio.to_thread(exporter.generate_markdown, metadata)
 
     def iter_documents(self) -> Iterable[DocumentMetadata]:
         return list(self.repository.list())
