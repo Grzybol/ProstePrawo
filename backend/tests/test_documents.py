@@ -85,6 +85,7 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
         "Klient – osoba fizyczna korzystająca z usług.\n"
         "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
         "Art. 2. Kara umowna wynosi 5000 zł.\n"
+        "Ryzyko utraty dostępu występuje w przypadku braku płatności.\n"
         "Kontakt: biuro@example.com."
     ).encode()
     response = client.post("/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
@@ -98,6 +99,8 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert "pii_placeholders" in data
     assert "email" in data["pii_placeholders"]
     assert all("<" in value and ">" in value for value in data["pii_placeholders"]["email"])
+    assert data["risks"]
+    assert any("ryzyko" in entry.lower() for entry in data["risks"])
     assert "source_path" not in data
     assert "sanitized_path" not in data
     assert "pii_secret_path" not in data
@@ -163,6 +166,7 @@ def test_document_listing_does_not_expose_paths(client_and_modules):
         assert "source_path" not in entry
         assert "sanitized_path" not in entry
         assert "pii_secret_path" not in entry
+        assert "risks" in entry
 
 
 def test_repository_survives_restart(client_and_modules):
@@ -235,6 +239,7 @@ def test_markdown_export_returns_sanitized_content(client_and_modules):
     payload = (
         "Na potrzeby regulaminu \"Usługodawca\" oznacza ProstePrawo Sp. z o.o.\n"
         "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
+        "Istnieje ryzyko naliczenia odsetek przy braku płatności.\n"
         "Kontakt: biuro@example.com."
     ).encode()
     response = client.post("/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
@@ -254,6 +259,7 @@ def test_markdown_export_returns_sanitized_content(client_and_modules):
     assert "### Usługodawca" in body
     assert "## Uproszczone brzmienie" in body
     assert "W prostych słowach" in body
+    assert "## Potencjalne ryzyka" in body
 
 
 def test_simplified_endpoint_exposes_plain_language_sections(client_and_modules):
@@ -297,6 +303,29 @@ def test_definitions_endpoint_returns_glossary(client_and_modules):
     assert "Regulamin" in terms
     assert "zbiór zasad" in terms["Regulamin"].lower()
     assert "Usługodawca" in terms
+
+
+def test_insights_endpoint_returns_checklists(client_and_modules):
+    client, _ = client_and_modules
+    payload = (
+        "Art. 1. Należy złożyć wniosek w terminie 14 dni.\n"
+        "Art. 2. Kara za opóźnienie to 200 zł.\n"
+        "W przeciwnym razie istnieje ryzyko utraty świadczenia."
+    ).encode("utf-8")
+
+    response = client.post("/documents/", files={"file": ("checklist.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    insights_response = client.get(f"/documents/{document_id}/insights")
+    assert insights_response.status_code == 200
+    data = insights_response.json()
+    assert data["document_id"] == str(document_id)
+    assert any("wniosek" in entry.lower() for entry in data["obligations"])
+    assert any("200" in entry for entry in data["penalties"])
+    assert any("14" in entry for entry in data["deadlines"])
+    assert any("ryzyko" in entry.lower() for entry in data["risks"])
+    assert data["summary"]
 
 
 def test_export_rejects_unsupported_format(client_and_modules):

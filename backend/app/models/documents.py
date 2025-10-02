@@ -55,6 +55,7 @@ class DocumentMetadata(BaseModel):
     obligations: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
     deadlines: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
     pii_secret_path: Path | None = None
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
@@ -73,6 +74,7 @@ class DocumentMetadata(BaseModel):
             obligations=list(self.obligations),
             penalties=list(self.penalties),
             deadlines=list(self.deadlines),
+            risks=list(self.risks),
             pii_placeholders=dict(self.pii_placeholders),
             simplified_sections=list(self.simplified_sections),
             definitions=list(self.definitions),
@@ -91,6 +93,7 @@ class DocumentMetadataPublic(BaseModel):
     obligations: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
     deadlines: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
     definitions: list[DocumentDefinition] = Field(default_factory=list)
@@ -109,3 +112,14 @@ class DocumentDefinitionsResponse(BaseModel):
 
     document_id: UUID
     definitions: list[DocumentDefinition] = Field(default_factory=list)
+
+
+class DocumentInsightsResponse(BaseModel):
+    """Response payload for checklist-style document insights."""
+
+    document_id: UUID
+    summary: str | None = None
+    obligations: list[str] = Field(default_factory=list)
+    penalties: list[str] = Field(default_factory=list)
+    deadlines: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)

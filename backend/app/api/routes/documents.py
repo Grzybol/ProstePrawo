@@ -11,6 +11,7 @@ from ...models.documents import (
     DocumentMetadataPublic,
     DocumentProcessingStatus,
     DocumentSimplifiedResponse,
+    DocumentInsightsResponse,
 )
 from ...services.pipeline import (
     DocumentNotFoundError,
@@ -116,3 +117,20 @@ async def get_definitions(document_id: UUID) -> DocumentDefinitionsResponse:
     if metadata.status != DocumentProcessingStatus.READY:
         raise HTTPException(status_code=409, detail="Document is still processing")
     return DocumentDefinitionsResponse(document_id=document_id, definitions=metadata.definitions)
+
+
+@router.get(
+    "/{document_id}/insights",
+    summary="Retrieve checklist-style insights for a document",
+    response_model=DocumentInsightsResponse,
+)
+async def get_insights(document_id: UUID) -> DocumentInsightsResponse:
+    """Expose summary, obligations, penalties, deadlines and risks for a document."""
+
+    try:
+        insights = pipeline.get_document_insights(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+    except DocumentNotReadyError as exc:
+        raise HTTPException(status_code=409, detail="Document is still processing") from exc
+    return DocumentInsightsResponse(document_id=document_id, **insights)
