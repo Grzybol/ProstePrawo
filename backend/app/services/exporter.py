@@ -34,6 +34,7 @@ def generate_markdown(metadata: DocumentMetadata) -> str:
     _extend_with_list(lines, "Twoje obowiązki", metadata.obligations)
     _extend_with_list(lines, "Potencjalne kary", metadata.penalties)
     _extend_with_list(lines, "Kluczowe terminy", metadata.deadlines)
+    _extend_with_list(lines, "Potencjalne ryzyka", metadata.risks)
 
     if metadata.definitions:
         lines.append("## Kluczowe definicje")

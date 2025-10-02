@@ -55,6 +55,10 @@ def extract_deadlines(text: str) -> list[str]:
     return _collect_sentences(text, ["termin", "dni", "miesiąc", "miesiac"])
 
 
+def extract_risks(text: str) -> list[str]:
+    return _collect_sentences(text, ["ryzyk", "zagroż", "niebezpiecz", "utrata", "szkody"])
+
+
 def answer_question(question: str, retrieved_chunks: list[RetrievedChunk]) -> QaAnswer:
     if not retrieved_chunks:
         return QaAnswer(content="Brak danych pozwalających na udzielenie odpowiedzi.", sources=[])

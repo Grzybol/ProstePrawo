@@ -105,6 +105,7 @@ class DocumentPipeline:
             metadata.obligations = inference.extract_obligations(sanitized.text)
             metadata.penalties = inference.extract_penalties(sanitized.text)
             metadata.deadlines = inference.extract_deadlines(sanitized.text)
+            metadata.risks = inference.extract_risks(sanitized.text)
             metadata.simplified_sections = inference.simplify_sections(sanitized_sections)
             metadata.definitions = inference.extract_definitions(sanitized.text)
             metadata.status = DocumentProcessingStatus.READY
@@ -153,6 +154,18 @@ class DocumentPipeline:
         if metadata.status != DocumentProcessingStatus.READY:
             raise DocumentNotReadyError(document_id)
         return list(metadata.simplified_sections)
+
+    def get_document_insights(self, document_id: UUID) -> dict[str, object]:
+        metadata = self._get(document_id)
+        if metadata.status != DocumentProcessingStatus.READY:
+            raise DocumentNotReadyError(document_id)
+        return {
+            "summary": metadata.summary,
+            "obligations": list(metadata.obligations),
+            "penalties": list(metadata.penalties),
+            "deadlines": list(metadata.deadlines),
+            "risks": list(metadata.risks),
+        }
 
     async def _persist_upload(self, file: UploadFile, metadata: DocumentMetadata) -> None:
         filename = Path(file.filename).name if file.filename else "document"
