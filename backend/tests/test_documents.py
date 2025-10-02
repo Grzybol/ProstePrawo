@@ -122,3 +122,46 @@ def test_repository_survives_restart(client_and_modules):
 
     answer = asyncio.run(new_pipeline.answer_question(document_id, "Jakie są obowiązki stron?"))
     assert "obowiąz" in answer.lower()
+
+
+def test_indexing_is_isolated_between_documents(client_and_modules):
+    client, _ = client_and_modules
+
+    alpha_payload = (
+        "Dokument Alfa.\n"
+        "Art. 1. Szczegóły dotyczą wyłącznie procedury Alfa."
+    ).encode("utf-8")
+    beta_payload = (
+        "Dokument Beta.\n"
+        "Art. 1. Niniejszy opis skupia się na zadaniach Beta."
+    ).encode("utf-8")
+
+    alpha_response = client.post(
+        "/documents/",
+        files={"file": ("alpha.txt", alpha_payload, "text/plain")},
+    )
+    beta_response = client.post(
+        "/documents/",
+        files={"file": ("beta.txt", beta_payload, "text/plain")},
+    )
+
+    alpha_id = UUID(alpha_response.json()["document_id"])
+    beta_id = UUID(beta_response.json()["document_id"])
+
+    _wait_for_status(client, alpha_id, "ready")
+    _wait_for_status(client, beta_id, "ready")
+
+    alpha_answer = client.get(
+        f"/documents/{alpha_id}/qa",
+        params={"question": "Czego dotyczy procedura Alfa?"},
+    ).json()["answer"]
+    beta_answer = client.get(
+        f"/documents/{beta_id}/qa",
+        params={"question": "Czego dotyczy zadanie Beta?"},
+    ).json()["answer"]
+
+    assert "Źródła" in alpha_answer
+    assert "Źródła" in beta_answer
+    assert "Alfa" in alpha_answer
+    assert "Beta" in beta_answer
+    assert "Alfa" not in beta_answer
