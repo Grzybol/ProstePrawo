@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import textwrap
 from typing import Iterable
 
+from ..models.documents import SectionSimplification
 from .indexing import RetrievedChunk
+from .ingestion import DocumentSection
 
 
 @dataclass(slots=True)
@@ -63,3 +66,88 @@ def answer_question(question: str, retrieved_chunks: list[RetrievedChunk]) -> Qa
     )
     sources = [chunk.identifier for chunk in retrieved_chunks]
     return QaAnswer(content=content, sources=sources)
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_AMOUNT_PATTERN = re.compile(r"(\d[\d\s\u00a0]*)(?:\s*)(zł|pln)", re.IGNORECASE)
+_DEADLINE_PATTERN = re.compile(r"(\d+[\s\u00a0]*)(dni|dzień|dnia|miesi(?:ą|a)c)", re.IGNORECASE)
+_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bNiniejszym\b", re.IGNORECASE), "Tym dokumentem"),
+    (re.compile(r"\bNiniejsza\b", re.IGNORECASE), "Ta"),
+    (re.compile(r"\bNiniejszy\b", re.IGNORECASE), "Ten"),
+    (re.compile(r"\bStrony\b", re.IGNORECASE), "osoby"),
+    (re.compile(r"\bStrona\b", re.IGNORECASE), "osoba"),
+    (re.compile(r"\bjest zobowiązan[ay]\b(?:\s+do)?", re.IGNORECASE), "musi"),
+    (re.compile(r"\bzobowiązan[ey]\b", re.IGNORECASE), "ma obowiązek"),
+    (re.compile(r"\bNależy\b", re.IGNORECASE), "Trzeba"),
+    (re.compile(r"\bPowinien\b", re.IGNORECASE), "Powinieneś"),
+    (re.compile(r"\bW terminie\b", re.IGNORECASE), "W ciągu"),
+    (re.compile(r"\bKara umowna\b", re.IGNORECASE), "Kara"),
+    (re.compile(r"\bArt\.\s*(\d+)\b", re.IGNORECASE), r"Artykuł \1"),
+    (re.compile(r"§"), "paragraf"),
+)
+
+
+def simplify_sections(sections: Iterable[DocumentSection]) -> list[SectionSimplification]:
+    """Generate naive plain-language explanations for document sections."""
+
+    simplifications: list[SectionSimplification] = []
+    for section in sections:
+        plain_text = _simplify_text(section.text)
+        excerpt = _create_excerpt(section.text)
+        simplifications.append(
+            SectionSimplification(
+                identifier=section.identifier,
+                source_excerpt=excerpt,
+                plain_language=plain_text,
+            )
+        )
+    return simplifications
+
+
+def _simplify_text(text: str) -> str:
+    sentences = [segment.strip() for segment in _SENTENCE_SPLIT.split(text) if segment and segment.strip()]
+    if not sentences:
+        sentences = [text.strip()]
+    simplified: list[str] = []
+    for sentence in sentences:
+        simplified_sentence = sentence
+        for pattern, replacement in _REPLACEMENTS:
+            simplified_sentence = pattern.sub(replacement, simplified_sentence)
+        simplified_sentence = re.sub(r"\s+", " ", simplified_sentence).strip()
+        if not simplified_sentence:
+            continue
+        simplified_sentence = simplified_sentence[0].upper() + simplified_sentence[1:]
+        if simplified_sentence[-1] not in ".!?":
+            simplified_sentence += "."
+        simplified.append(simplified_sentence)
+    insights = _derive_insights(text)
+    if insights:
+        simplified.append("Ważne informacje: " + " ".join(insights))
+    content = " ".join(simplified)
+    if not content:
+        content = "Tekst nie zawiera szczegółów do uproszczenia."
+    return f"W prostych słowach: {content}"
+
+
+def _derive_insights(text: str) -> list[str]:
+    insights: list[str] = []
+    seen: set[str] = set()
+    for match in _DEADLINE_PATTERN.finditer(text):
+        value = f"Masz {match.group(1).strip()} {match.group(2).lower()} na wykonanie zadania."
+        if value not in seen:
+            seen.add(value)
+            insights.append(value)
+    for match in _AMOUNT_PATTERN.finditer(text):
+        amount = f"Kwota to {match.group(1).strip()} {match.group(2).upper()}."
+        if amount not in seen:
+            seen.add(amount)
+            insights.append(amount)
+    return insights
+
+
+def _create_excerpt(text: str) -> str:
+    collapsed = re.sub(r"\s+", " ", text).strip()
+    if len(collapsed) <= 280:
+        return collapsed
+    return collapsed[:277] + "..."
