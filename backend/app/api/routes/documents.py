@@ -4,7 +4,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile
 
-from ...models.documents import DocumentCreateResponse, DocumentMetadata
+from ...models.documents import (
+    DocumentCreateResponse,
+    DocumentMetadata,
+    DocumentMetadataPublic,
+)
 from ...services.pipeline import DocumentNotFoundError, DocumentPipeline
 
 router = APIRouter()
@@ -19,19 +23,28 @@ async def upload_document(file: UploadFile) -> DocumentCreateResponse:
     return DocumentCreateResponse(document_id=document.document_id, status=document.status)
 
 
-@router.get("/", summary="List processed documents", response_model=list[DocumentMetadata])
-async def list_documents() -> Iterable[DocumentMetadata]:
+@router.get(
+    "/",
+    summary="List processed documents",
+    response_model=list[DocumentMetadataPublic],
+)
+async def list_documents() -> Iterable[DocumentMetadataPublic]:
     """Return metadata for all processed documents in the local store."""
-    return pipeline.iter_documents()
+    return [document.to_public() for document in pipeline.iter_documents()]
 
 
-@router.get("/{document_id}", summary="Get metadata for a document", response_model=DocumentMetadata)
-async def get_document(document_id: UUID) -> DocumentMetadata:
+@router.get(
+    "/{document_id}",
+    summary="Get metadata for a document",
+    response_model=DocumentMetadataPublic,
+)
+async def get_document(document_id: UUID) -> DocumentMetadataPublic:
     """Fetch stored metadata for an individual document."""
     try:
-        return pipeline.get_document(document_id)
+        document = pipeline.get_document(document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
+    return document.to_public()
 
 
 @router.get("/{document_id}/qa", summary="Ask a question about a document")

@@ -25,7 +25,7 @@ Monolityczna aplikacja FastAPI z serwowanym statycznie frontendem React ma upro�
 1. Użytkownik wgrywa plik → `/documents`.
 2. Pipeline zapisuje plik w `data/{docId}/raw`, tworzy rekord metadanych i rozpoczyna asynchroniczne przetwarzanie.
 3. Ingestion normalizuje tekst, identyfikuje strukturę, wykrywa język i sekcje.
-4. Sanitizer zamienia wrażliwe dane na tagi (<PESEL_1>, <IMIE_2>), zapisuje mapowanie w zaszyfrowanym magazynie.
+4. Sanitizer zamienia wrażliwe dane na tagi (<PESEL_1>, <IMIE_2>), zapisuje mapowanie w magazynie `data/{docId}/secure` z uprawnieniami 700/600.
 5. Indeksowanie tworzy wektory + indeks BM25, zapisuje metadane (sygnatura, numer Dz.U., okres obowiązywania) w SQL/Elastic.
 6. Moduł Inference generuje uproszczenia, streszczenia i listy obowiązków/kar, zapisuje cytowane jednostki.
 7. Użytkownik może pobrać eksport (PDF/DOCX/Markdown) lub zadać pytanie Q&A z cytatem.

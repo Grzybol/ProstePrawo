@@ -36,6 +36,37 @@ class DocumentMetadata(BaseModel):
     pii_secret_path: Path | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
+    def to_public(self) -> "DocumentMetadataPublic":
+        """Expose a sanitized view suitable for API responses."""
+
+        return DocumentMetadataPublic(
+            document_id=self.document_id,
+            title=self.title,
+            created_at=self.created_at,
+            status=self.status,
+            summary=self.summary,
+            obligations=list(self.obligations),
+            penalties=list(self.penalties),
+            deadlines=list(self.deadlines),
+            pii_placeholders=dict(self.pii_placeholders),
+            extra=dict(self.extra),
+        )
+
+
+class DocumentMetadataPublic(BaseModel):
+    """Subset of metadata fields safe to return to API consumers."""
+
+    document_id: UUID
+    title: str
+    created_at: datetime
+    status: DocumentProcessingStatus
+    summary: str | None = None
+    obligations: list[str] = Field(default_factory=list)
+    penalties: list[str] = Field(default_factory=list)
+    deadlines: list[str] = Field(default_factory=list)
+    pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
+
 
 class DocumentCreateResponse(BaseModel):
     """Response payload for a document upload."""

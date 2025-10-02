@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
@@ -63,11 +64,15 @@ class DocumentPipeline:
 
             secure_dir = self._settings.data_dir / str(document_id) / "secure"
             secure_dir.mkdir(parents=True, exist_ok=True)
+            if os.name != "nt":
+                os.chmod(secure_dir, 0o700)
             secrets_path = secure_dir / "pii_map.json"
             secrets_path.write_text(
                 json.dumps(sanitized.secrets, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            if os.name != "nt":
+                os.chmod(secrets_path, 0o600)
 
             metadata.sanitized_path = sanitized_path
             metadata.pii_placeholders = sanitized.entities
