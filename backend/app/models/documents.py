@@ -28,8 +28,6 @@ class DocumentMetadata(BaseModel):
     status: DocumentProcessingStatus = DocumentProcessingStatus.RECEIVED
     source_path: Path | None = None
     sanitized_path: Path | None = None
-    student_book_pdf: Path | None = None
-    teacher_book_pdf: Path | None = None
     summary: str | None = None
     obligations: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
