@@ -1,6 +1,36 @@
 # ProstePrawo
 
-Mobilny i webowy asystent, który importuje akty prawne, umowy czy regulaminy i tłumaczy je na język zrozumiały dla przeciętnej osoby.
+**ProstePrawo** to mobilny i webowy asystent, który tłumaczy język prawniczy na zrozumiały polski. System importuje akty prawne, umowy czy regulaminy, anonimizuje wrażliwe dane i udostępnia uproszczone wersje tekstów wraz z modułem pytań i odpowiedzi.
+
+## Główne możliwości
+
+- **Uproszczenie treści** – tłumaczenie artykułów, paragrafów i punktów na jasny język przy zachowaniu znaczenia i odwołań do jednostek redakcyjnych.
+- **Q&A z odwołaniami** – odpowiedzi na pytania zadane w języku naturalnym wraz z cytatami do konkretnych artykułów/paragrafów.
+- **Streszczenia i checklisty** – automatyczne listy obowiązków, ryzyk, kar oraz terminów wynikających z dokumentu.
+- **Eksport** – generowanie raportów (PDF/DOCX/Markdown) i widoku „oryginał ↔ uproszczony”.
+- **Tryb prywatności** – cały oryginalny dokument pozostaje lokalnie, a do modeli chmurowych wysyłany jest wyłącznie zanonimizowany tekst.
+
+## Architektura (MVP → PRO)
+
+Monolityczna aplikacja FastAPI z wbudowanym frontendem (React + Vite) obejmuje następujące warstwy logiczne:
+
+1. **Ingestion** – import plików PDF, obrazów, DOCX oraz stron HTML; segmentacja na artykuły/§/ustępy/punkty.
+2. **Sanitizer/PII** – anonimizacja danych wrażliwych (PESEL, NIP, adresy, kwoty, nazwy własne) przed przekazaniem tekstu do modeli.
+3. **Indexing & RAG** – chunkowanie po jednostkach redakcyjnych, embeddingi, pełnotekstowe wyszukiwanie oraz zapis metadanych (sygnatura, Dz.U., daty obowiązywania).
+4. **Inference** – uproszczenia w języku potocznym, moduł Q&A oraz generatory streszczeń i checklist.
+5. **Eksport** – generowanie raportów w różnych formatach, widok porównawczy oraz API do pobrań.
+6. **Audit & Observability** – logowanie (tylko tekst zanonimizowany), wersjonowanie dokumentów i ślady zapytań.
+
+Szczegółowe diagramy i decyzje architektoniczne znajdują się w `docs/architecture.md`.
+
+## Stos technologiczny
+
+- **Backend:** Python 3.12, FastAPI, structlog/loguru, SQLite (MVP) / MariaDB, WeasyPrint.
+- **OCR i ekstrakcja:** ocrmypdf, Tesseract (pol+eng), PyMuPDF, pdfplumber, python-docx.
+- **Sanityzacja PII:** Presidio + niestandardowe rozpoznawacze PL.
+- **RAG i wyszukiwanie:** Elasticsearch 8.x (BM25 + k-NN), FAISS (fallback), onnxruntime (embeddingi i reranker).
+- **Modele LLM:** OpenAI (GPT-4.1/4o-mini) po anonimizacji oraz lokalne modele (Llama 3.1 8B, bge-m3/e5-small) w trybie „local-only”.
+- **Frontend:** React + Vite (TypeScript), Tailwind CSS, shadcn/ui, pdf.js.
 
 ## Struktura repozytorium
 
@@ -12,9 +42,11 @@ backend/
     models/     # modele Pydantic i encje domenowe
     services/   # serwisy biznesowe (pipeline, RAG, itp.)
   requirements.txt
+docs/
+  architecture.md
+README.md
+roadmap.md (plan rozwoju)
 ```
-
-Dodatkowe materiały architektoniczne znajdują się w `docs/architecture.md`.
 
 ## Uruchomienie backendu (MVP)
 
@@ -26,16 +58,20 @@ Dodatkowe materiały architektoniczne znajdują się w `docs/architecture.md`.
    pip install -r requirements.txt
    ```
 
-2. Uruchom serwer deweloperski:
+2. Skonfiguruj zmienne środowiskowe (np. `OPENAI_API_KEY`, ścieżki do Elasticsearch/FAISS) i katalog na pliki (`/data`).
+
+3. Uruchom serwer deweloperski:
    ```bash
    uvicorn app.main:app --reload
    ```
 
-3. Otwórz dokumentację interaktywną: [http://localhost:8000/docs](http://localhost:8000/docs).
+4. Otwórz dokumentację interaktywną: [http://localhost:8000/docs](http://localhost:8000/docs).
 
-## Kolejne kroki
+## Dalszy rozwój
 
-- Zaimplementowanie rzeczywistego pipeline'u (OCR, sanitizacja, indeksacja, RAG).
-- Dołączenie frontendu React (Vite + Tailwind + shadcn/ui) serwowanego jako statyczne pliki.
-- Konfiguracja ElasticSearch/FAISS oraz lokalnego trybu "air-gap".
-- Automatyzacja eksportu (PDF/DOCX/Markdown) i logowania zdarzeń.
+- Postępy i plan prac znajdziesz w pliku [`roadmap.md`](./roadmap.md).
+- Sugestie i usprawnienia architektoniczne zapisuj w `docs/architecture.md`.
+
+## Licencja
+
+Licencja projektu zostanie określona na późniejszym etapie.
