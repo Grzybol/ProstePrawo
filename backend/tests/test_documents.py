@@ -96,12 +96,21 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert "pii_placeholders" in data
     assert "email" in data["pii_placeholders"]
     assert all("<" in value and ">" in value for value in data["pii_placeholders"]["email"])
+    assert "source_path" not in data
+    assert "sanitized_path" not in data
+    assert "pii_secret_path" not in data
     serialized = json.dumps(data)
     assert "biuro@example.com" not in serialized
 
+    metadata = documents_module.pipeline.get_document(document_id)
+
     from sqlite3 import connect
 
-    with connect(Path(data["pii_secret_path"]).parents[2] / "metadata.db") as conn:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+
+    with connect(Path(settings.data_dir) / "metadata.db") as conn:
         row = conn.execute(
             "SELECT payload FROM documents WHERE document_id = ?",
             (str(document_id),),
@@ -109,7 +118,8 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
         assert row is not None
         assert "biuro@example.com" not in row[0]
 
-    secret_path = Path(data["pii_secret_path"])
+    assert metadata.pii_secret_path is not None
+    secret_path = Path(metadata.pii_secret_path)
     assert secret_path.exists()
     secrets_payload = secret_path.read_text(encoding="utf-8")
     assert "biuro@example.com" in secrets_payload
@@ -120,6 +130,26 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     )
     answer = qa_response.json()["answer"]
     assert "Źródła" in answer
+
+
+def test_document_listing_does_not_expose_paths(client_and_modules):
+    client, _ = client_and_modules
+    payload = "Art. 1. Dane wrażliwe są zamaskowane.".encode("utf-8")
+
+    response = client.post("/documents/", files={"file": ("dokument.txt", payload, "text/plain")})
+
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    listing = client.get("/documents/")
+    assert listing.status_code == 200
+    documents = listing.json()
+    assert any(entry["document_id"] == str(document_id) for entry in documents)
+
+    for entry in documents:
+        assert "source_path" not in entry
+        assert "sanitized_path" not in entry
+        assert "pii_secret_path" not in entry
 
 
 def test_repository_survives_restart(client_and_modules):

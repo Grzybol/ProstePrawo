@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import sqlite3
 import sys
@@ -107,5 +108,40 @@ def test_pipeline_persists_only_placeholders(tmp_path, monkeypatch):
         placeholders = json.loads(secrets_content)
         assert placeholders["email"]["<EMAIL_1>"] == "biuro@example.com"
         assert placeholders["pesel"]["<PESEL_1>"] == "12345678901"
+    finally:
+        config.get_settings.cache_clear()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support POSIX permission checks")
+def test_secure_artifacts_have_restrictive_permissions(tmp_path, monkeypatch):
+    pytest.importorskip("pydantic")
+    monkeypatch.setenv("PROSTE_PRAWO_DATA_DIR", str(tmp_path))
+    from app.core import config
+    from app.models.documents import DocumentMetadata
+    from app.services.pipeline import DocumentPipeline
+
+    config.get_settings.cache_clear()
+    try:
+        pipeline = DocumentPipeline()
+
+        metadata = DocumentMetadata(title="regulamin.txt")
+        document_dir = tmp_path / str(metadata.document_id) / "raw"
+        document_dir.mkdir(parents=True, exist_ok=True)
+        source_path = document_dir / "regulamin.txt"
+        source_path.write_text("Art. 1. Poufne dane.", encoding="utf-8")
+        metadata.source_path = source_path
+
+        pipeline.repository.upsert(metadata)
+        asyncio.run(pipeline._run_pipeline(metadata.document_id))
+
+        processed = pipeline.get_document(metadata.document_id)
+        assert processed.pii_secret_path is not None
+        secure_dir = processed.pii_secret_path.parent
+
+        dir_mode = secure_dir.stat().st_mode & 0o777
+        file_mode = processed.pii_secret_path.stat().st_mode & 0o777
+
+        assert dir_mode == 0o700
+        assert file_mode == 0o600
     finally:
         config.get_settings.cache_clear()
