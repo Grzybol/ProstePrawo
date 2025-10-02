@@ -18,6 +18,14 @@ class SectionSimplification(BaseModel):
     plain_language: str
 
 
+class DocumentDefinition(BaseModel):
+    """Definition of a legal term detected in the source material."""
+
+    term: str
+    meaning: str
+    source: str | None = None
+
+
 class DocumentSimplifiedResponse(BaseModel):
     """Payload returned for simplified document views."""
 
@@ -50,6 +58,7 @@ class DocumentMetadata(BaseModel):
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
     pii_secret_path: Path | None = None
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
+    definitions: list[DocumentDefinition] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 
     def to_public(self) -> "DocumentMetadataPublic":
@@ -66,6 +75,7 @@ class DocumentMetadata(BaseModel):
             deadlines=list(self.deadlines),
             pii_placeholders=dict(self.pii_placeholders),
             simplified_sections=list(self.simplified_sections),
+            definitions=list(self.definitions),
             extra=dict(self.extra),
         )
 
@@ -83,6 +93,7 @@ class DocumentMetadataPublic(BaseModel):
     deadlines: list[str] = Field(default_factory=list)
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
+    definitions: list[DocumentDefinition] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -91,3 +102,10 @@ class DocumentCreateResponse(BaseModel):
 
     document_id: UUID
     status: DocumentProcessingStatus
+
+
+class DocumentDefinitionsResponse(BaseModel):
+    """Response payload for the definitions endpoint."""
+
+    document_id: UUID
+    definitions: list[DocumentDefinition] = Field(default_factory=list)

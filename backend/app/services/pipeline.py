@@ -106,6 +106,7 @@ class DocumentPipeline:
             metadata.penalties = inference.extract_penalties(sanitized.text)
             metadata.deadlines = inference.extract_deadlines(sanitized.text)
             metadata.simplified_sections = inference.simplify_sections(sanitized_sections)
+            metadata.definitions = inference.extract_definitions(sanitized.text)
             metadata.status = DocumentProcessingStatus.READY
             self.repository.upsert(metadata)
         except Exception as exc:  # pragma: no cover - defensive path
