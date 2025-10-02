@@ -81,6 +81,8 @@ def _wait_for_status(client: TestClient, document_id: UUID, expected: str, timeo
 def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     client, documents_module = client_and_modules
     payload = (
+        "Na potrzeby regulaminu \"Usługodawca\" oznacza ProstePrawo Sp. z o.o.\n"
+        "Klient – osoba fizyczna korzystająca z usług.\n"
         "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
         "Art. 2. Kara umowna wynosi 5000 zł.\n"
         "Kontakt: biuro@example.com."
@@ -108,6 +110,10 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert first_section["plain_language"].startswith("W prostych słowach")
     assert "należy" not in first_section["plain_language"].lower()
     assert "<EMAIL_1>" in " ".join(section["plain_language"] for section in simplified_sections)
+
+    definitions = data["definitions"]
+    assert any(entry["term"] == "Usługodawca" for entry in definitions)
+    assert any("osoba fizyczna" in entry["meaning"] for entry in definitions)
 
     metadata = documents_module.pipeline.get_document(document_id)
 
@@ -227,6 +233,7 @@ def test_indexing_is_isolated_between_documents(client_and_modules):
 def test_markdown_export_returns_sanitized_content(client_and_modules):
     client, _ = client_and_modules
     payload = (
+        "Na potrzeby regulaminu \"Usługodawca\" oznacza ProstePrawo Sp. z o.o.\n"
         "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
         "Kontakt: biuro@example.com."
     ).encode()
@@ -243,6 +250,8 @@ def test_markdown_export_returns_sanitized_content(client_and_modules):
     assert "<EMAIL_1>" in body
     assert "biuro@example.com" not in body
     assert "## Podsumowanie" in body
+    assert "## Kluczowe definicje" in body
+    assert "### Usługodawca" in body
     assert "## Uproszczone brzmienie" in body
     assert "W prostych słowach" in body
 
@@ -267,6 +276,27 @@ def test_simplified_endpoint_exposes_plain_language_sections(client_and_modules)
     assert any(text.startswith("W prostych słowach") for text in plain_texts)
     assert all("należy" not in text.lower() for text in plain_texts)
     assert any("5000" in text for text in plain_texts)
+
+
+def test_definitions_endpoint_returns_glossary(client_and_modules):
+    client, _ = client_and_modules
+    payload = (
+        "\"Regulamin\" oznacza zbiór zasad.\n"
+        "Usługodawca - podmiot świadczący usługi."
+    ).encode("utf-8")
+
+    response = client.post("/documents/", files={"file": ("slownik.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    definitions_response = client.get(f"/documents/{document_id}/definitions")
+    assert definitions_response.status_code == 200
+    data = definitions_response.json()
+    assert data["document_id"] == str(document_id)
+    terms = {entry["term"]: entry["meaning"] for entry in data["definitions"]}
+    assert "Regulamin" in terms
+    assert "zbiór zasad" in terms["Regulamin"].lower()
+    assert "Usługodawca" in terms
 
 
 def test_export_rejects_unsupported_format(client_and_modules):

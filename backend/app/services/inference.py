@@ -6,7 +6,7 @@ import re
 import textwrap
 from typing import Iterable
 
-from ..models.documents import SectionSimplification
+from ..models.documents import DocumentDefinition, SectionSimplification
 from .indexing import RetrievedChunk
 from .ingestion import DocumentSection
 
@@ -71,6 +71,12 @@ def answer_question(question: str, retrieved_chunks: list[RetrievedChunk]) -> Qa
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _AMOUNT_PATTERN = re.compile(r"(\d[\d\s\u00a0]*)(?:\s*)(zł|pln)", re.IGNORECASE)
 _DEADLINE_PATTERN = re.compile(r"(\d+[\s\u00a0]*)(dni|dzień|dnia|miesi(?:ą|a)c)", re.IGNORECASE)
+_DEFINITION_VERB_PATTERN = re.compile(
+    r"[„\"']?(?P<term>[A-ZŁŚŻŹĆÓ][^\"”'\n]{1,80}?)[”\"']?\s+"
+    r"(?:oznacza|zwan[ayoe]?|zwanych|zwanym|rozumie się jako|należy rozumieć jako)\s+"
+    r"(?P<definition>[^.;]+)",
+    re.IGNORECASE,
+)
 _REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bNiniejszym\b", re.IGNORECASE), "Tym dokumentem"),
     (re.compile(r"\bNiniejsza\b", re.IGNORECASE), "Ta"),
@@ -151,3 +157,87 @@ def _create_excerpt(text: str) -> str:
     if len(collapsed) <= 280:
         return collapsed
     return collapsed[:277] + "..."
+
+
+def extract_definitions(text: str) -> list[DocumentDefinition]:
+    """Derive a glossary of legal terms from sanitised text."""
+
+    definitions: dict[str, DocumentDefinition] = {}
+    for sentence in _iter_definition_candidates(text):
+        for term, meaning in _parse_definition_sentence(sentence):
+            if not term or not meaning:
+                continue
+            key = term.lower()
+            if key in definitions:
+                continue
+            definitions[key] = DocumentDefinition(
+                term=term,
+                meaning=meaning,
+                source=sentence.strip(),
+            )
+    return list(definitions.values())
+
+
+def _iter_definition_candidates(text: str) -> Iterable[str]:
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        # Process both raw lines and sentence-level splits to capture multi-line definitions.
+        yield stripped
+        for sentence in _SENTENCE_SPLIT.split(stripped):
+            sentence = sentence.strip()
+            if sentence and sentence != stripped:
+                yield sentence
+
+
+def _parse_definition_sentence(sentence: str) -> Iterable[tuple[str, str]]:
+    matches = []
+    verb_match = _DEFINITION_VERB_PATTERN.search(sentence)
+    if verb_match:
+        matches.append(
+            (
+                _normalise_term(verb_match.group("term")),
+                _clean_meaning(verb_match.group("definition")),
+            )
+        )
+    separator_match = _split_definition_by_separator(sentence)
+    if separator_match:
+        matches.append(separator_match)
+    for term, meaning in matches:
+        term = term.strip()
+        meaning = meaning.strip()
+        if len(term) > 1 and len(meaning) > 3:
+            yield term, meaning
+
+
+def _split_definition_by_separator(sentence: str) -> tuple[str, str] | None:
+    # Support patterns such as "Klient – osoba fizyczna ..." or "Klient: osoba ..."
+    separator: str | None = None
+    for token in (" – ", " - ", " — ", ":", " –", "-", "—"):
+        if token in sentence:
+            separator = token
+            break
+    if not separator:
+        return None
+    parts = sentence.split(separator, 1)
+    if len(parts) != 2:
+        return None
+    term, definition = parts[0].strip(), parts[1].strip()
+    if len(term.split()) > 6:
+        return None
+    if not term or not definition:
+        return None
+    return _normalise_term(term), _clean_meaning(definition)
+
+
+def _normalise_term(term: str) -> str:
+    cleaned = term.strip().strip("'\"”„“»«")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _clean_meaning(meaning: str) -> str:
+    cleaned = meaning.strip().rstrip(".;")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
