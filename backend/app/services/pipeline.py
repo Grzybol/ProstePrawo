@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
@@ -60,8 +61,17 @@ class DocumentPipeline:
             sanitized_path = sanitized_dir / "document.txt"
             sanitized_path.write_text(sanitized.text, encoding="utf-8")
 
+            secure_dir = self._settings.data_dir / str(document_id) / "secure"
+            secure_dir.mkdir(parents=True, exist_ok=True)
+            secrets_path = secure_dir / "pii_map.json"
+            secrets_path.write_text(
+                json.dumps(sanitized.secrets, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
             metadata.sanitized_path = sanitized_path
-            metadata.pii_entities = sanitized.entities
+            metadata.pii_placeholders = sanitized.entities
+            metadata.pii_secret_path = secrets_path
 
             sanitized_sections = await asyncio.to_thread(
                 lambda: ingestion.extract_document(sanitized_path).sections

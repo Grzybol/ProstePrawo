@@ -68,8 +68,20 @@ def _read_text(path: Path) -> str:
 
 def _split_into_sections(text: str) -> Iterable[DocumentSection]:
     buffer = io.StringIO()
-    current_identifier = "section-1"
-    index = 1
+    current_label: str | None = None
+    emitted = 0
+
+    def emit_section(content: str, label: str | None) -> Iterable[DocumentSection]:
+        nonlocal emitted
+        stripped = content.strip()
+        if not stripped:
+            return []
+        emitted += 1
+        identifier = f"section-{emitted}"
+        if label:
+            identifier = f"{identifier}: {label}"
+        return [DocumentSection(identifier=identifier, text=stripped)]
+
     for line in text.splitlines():
         line = line.rstrip()
         if not line:
@@ -77,12 +89,21 @@ def _split_into_sections(text: str) -> Iterable[DocumentSection]:
             continue
         match = _SECTION_PATTERN.match(line)
         if match:
-            if buffer.tell() > 0:
-                yield DocumentSection(identifier=current_identifier, text=buffer.getvalue().strip())
+            content = buffer.getvalue()
+            if content and (emitted > 0 or current_label is not None):
+                for section in emit_section(content, current_label):
+                    yield section
                 buffer = io.StringIO()
-            index += 1
-            current_identifier = f"section-{index}: {match.group().strip()}"
+            elif content:
+                # Preserve leading preambles inside the first labelled section.
+                buffer = io.StringIO()
+                buffer.write(content)
+            else:
+                buffer = io.StringIO()
+            current_label = match.group().strip()
         buffer.write(line)
         buffer.write("\n")
-    if buffer.tell() > 0:
-        yield DocumentSection(identifier=current_identifier, text=buffer.getvalue().strip())
+    content = buffer.getvalue()
+    if content:
+        for section in emit_section(content, current_label):
+            yield section
