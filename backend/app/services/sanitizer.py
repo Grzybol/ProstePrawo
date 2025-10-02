@@ -23,6 +23,7 @@ class SanitizationResult:
 
     text: str
     entities: dict[str, list[str]]
+    secrets: dict[str, dict[str, str]]
 
 
 def sanitize_text(text: str) -> SanitizationResult:
@@ -35,6 +36,7 @@ def sanitize_text(text: str) -> SanitizationResult:
     """
 
     entities: dict[str, list[str]] = defaultdict(list)
+    secrets: dict[str, dict[str, str]] = defaultdict(dict)
     sanitized = text
     for entity, pattern in PII_PATTERNS.items():
         counter = 0
@@ -43,6 +45,7 @@ def sanitize_text(text: str) -> SanitizationResult:
             counter += 1
             placeholder = f"<{entity.upper()}_{counter}>"
             value = match.group(0)
-            entities[entity].append(value)
+            entities[entity].append(placeholder)
+            secrets[entity][placeholder] = value
             sanitized = sanitized.replace(value, placeholder, 1)
-    return SanitizationResult(text=sanitized, entities=dict(entities))
+    return SanitizationResult(text=sanitized, entities=dict(entities), secrets=dict(secrets))

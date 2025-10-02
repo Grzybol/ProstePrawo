@@ -32,7 +32,8 @@ class DocumentMetadata(BaseModel):
     obligations: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
     deadlines: list[str] = Field(default_factory=list)
-    pii_entities: dict[str, list[str]] = Field(default_factory=dict)
+    pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
+    pii_secret_path: Path | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

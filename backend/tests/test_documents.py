@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import time
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -92,7 +93,26 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert data["summary"] is not None
     assert any("termin" in item.lower() for item in data["deadlines"])
     assert any("kara" in item.lower() for item in data["penalties"])
-    assert "EMAIL" in " ".join(data["pii_entities"].keys()).upper()
+    assert "pii_placeholders" in data
+    assert "email" in data["pii_placeholders"]
+    assert all("<" in value and ">" in value for value in data["pii_placeholders"]["email"])
+    serialized = json.dumps(data)
+    assert "biuro@example.com" not in serialized
+
+    from sqlite3 import connect
+
+    with connect(Path(data["pii_secret_path"]).parents[2] / "metadata.db") as conn:
+        row = conn.execute(
+            "SELECT payload FROM documents WHERE document_id = ?",
+            (str(document_id),),
+        ).fetchone()
+        assert row is not None
+        assert "biuro@example.com" not in row[0]
+
+    secret_path = Path(data["pii_secret_path"])
+    assert secret_path.exists()
+    secrets_payload = secret_path.read_text(encoding="utf-8")
+    assert "biuro@example.com" in secrets_payload
 
     qa_response = client.get(
         f"/documents/{document_id}/qa",
