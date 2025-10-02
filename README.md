@@ -67,6 +67,18 @@ roadmap.md (plan rozwoju)
 
 4. Otwórz dokumentację interaktywną: [http://localhost:8000/docs](http://localhost:8000/docs).
 
+## Uruchomienie w Dockerze
+
+1. Zbuduj obraz oraz uruchom kontenery za pomocą Docker Compose:
+   ```bash
+   docker compose build
+   docker compose up
+   ```
+
+2. W razie potrzeby ustaw zmienne środowiskowe (np. `OPENAI_API_KEY`) w pliku `.env` w katalogu głównym lub przekazuj je przy wywołaniu `docker compose`.
+
+3. Domyślnie wolumen `./data` montowany jest do `/app/data` wewnątrz kontenera. Umożliwia to zachowanie wgrywanych dokumentów pomiędzy restartami. Dostosuj ścieżki lub usuń wolumen w `docker-compose.yml`, jeśli nie jest potrzebny.
+
 ## Dalszy rozwój
 
 - Postępy i plan prac znajdziesz w pliku [`roadmap.md`](./roadmap.md).
