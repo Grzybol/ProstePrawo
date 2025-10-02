@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from ...models.documents import DocumentCreateResponse, DocumentMetadata
 from ...services.pipeline import DocumentNotFoundError, DocumentPipeline
@@ -42,3 +43,25 @@ async def ask_question(document_id: UUID, question: str) -> dict[str, str]:
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
     return {"answer": answer}
+
+
+@router.get("/{document_id}/student-book", summary="Download the student PDF")
+async def download_student_book(document_id: UUID) -> FileResponse:
+    try:
+        path = pipeline.get_student_book(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
+
+
+@router.get("/{document_id}/teacher-book", summary="Download the teacher PDF")
+async def download_teacher_book(document_id: UUID) -> FileResponse:
+    try:
+        path = pipeline.get_teacher_book(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="application/pdf", filename=path.name)

@@ -67,7 +67,7 @@ def _serialize_document(document: DocumentMetadata) -> dict:
     data["document_id"] = str(document.document_id)
     data["created_at"] = document.created_at.isoformat()
     data["status"] = document.status.value
-    for path_key in ("source_path", "sanitized_path"):
+    for path_key in ("source_path", "sanitized_path", "student_book_pdf", "teacher_book_pdf"):
         value = data.get(path_key)
         if value is not None:
             data[path_key] = str(value)
@@ -79,7 +79,7 @@ def _deserialize_document(data: dict) -> DocumentMetadata:
     parsed["document_id"] = UUID(parsed["document_id"])
     parsed["created_at"] = datetime.fromisoformat(parsed["created_at"])
     parsed["status"] = DocumentProcessingStatus(parsed["status"])
-    for path_key in ("source_path", "sanitized_path"):
+    for path_key in ("source_path", "sanitized_path", "student_book_pdf", "teacher_book_pdf"):
         value = parsed.get(path_key)
         if value:
             parsed[path_key] = Path(value)
