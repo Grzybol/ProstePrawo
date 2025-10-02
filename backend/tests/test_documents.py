@@ -94,6 +94,16 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert any("kara" in item.lower() for item in data["penalties"])
     assert "EMAIL" in " ".join(data["pii_entities"].keys()).upper()
 
+    student_pdf = client.get(f"/documents/{document_id}/student-book")
+    assert student_pdf.status_code == 200
+    assert student_pdf.headers["content-type"].startswith("application/pdf")
+    assert student_pdf.content.startswith(b"%PDF")
+
+    teacher_pdf = client.get(f"/documents/{document_id}/teacher-book")
+    assert teacher_pdf.status_code == 200
+    assert teacher_pdf.headers["content-type"].startswith("application/pdf")
+    assert teacher_pdf.content.startswith(b"%PDF")
+
     qa_response = client.get(
         f"/documents/{document_id}/qa",
         params={"question": "Jaka kara grozi za naruszenie?"},
@@ -111,6 +121,8 @@ def test_repository_survives_restart(client_and_modules):
 
     metadata = documents_module.pipeline.get_document(document_id)
     assert metadata.sanitized_path and metadata.sanitized_path.exists()
+    assert metadata.student_book_pdf and metadata.student_book_pdf.exists()
+    assert metadata.teacher_book_pdf and metadata.teacher_book_pdf.exists()
 
     # Simulate application restart by creating a fresh pipeline instance
     from app.services.pipeline import DocumentPipeline
