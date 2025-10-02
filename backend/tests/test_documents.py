@@ -215,3 +215,37 @@ def test_indexing_is_isolated_between_documents(client_and_modules):
     assert "Alfa" in alpha_answer
     assert "Beta" in beta_answer
     assert "Alfa" not in beta_answer
+
+
+def test_markdown_export_returns_sanitized_content(client_and_modules):
+    client, _ = client_and_modules
+    payload = (
+        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
+        "Kontakt: biuro@example.com."
+    ).encode()
+    response = client.post("/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    export_response = client.get(f"/documents/{document_id}/export", params={"format": "markdown"})
+
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith("text/markdown")
+    body = export_response.text
+    assert "# regulamin.txt" in body
+    assert "<EMAIL_1>" in body
+    assert "biuro@example.com" not in body
+    assert "## Podsumowanie" in body
+
+
+def test_export_rejects_unsupported_format(client_and_modules):
+    client, _ = client_and_modules
+    payload = "Art. 1. Dane wrażliwe.".encode("utf-8")
+    response = client.post("/documents/", files={"file": ("dokument.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    export_response = client.get(f"/documents/{document_id}/export", params={"format": "pdf"})
+
+    assert export_response.status_code == 400
+    assert "Unsupported export format" in export_response.json()["detail"]
