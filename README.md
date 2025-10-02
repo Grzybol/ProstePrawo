@@ -59,6 +59,7 @@ roadmap.md (plan rozwoju)
    ```
 
 2. Skonfiguruj zmienne środowiskowe (np. `OPENAI_API_KEY`, ścieżki do Elasticsearch/FAISS) i katalog na pliki (`/data`).
+   Możesz skopiować plik `.example.env` do `.env` i uzupełnić wartości zgodnie ze swoją konfiguracją.
 
 3. Uruchom serwer deweloperski:
    ```bash
@@ -75,7 +76,8 @@ roadmap.md (plan rozwoju)
    docker compose up
    ```
 
-2. W razie potrzeby ustaw zmienne środowiskowe (np. `OPENAI_API_KEY`) w pliku `.env` w katalogu głównym lub przekazuj je przy wywołaniu `docker compose`.
+2. W razie potrzeby ustaw zmienne środowiskowe (np. `OPENAI_API_KEY`) w pliku `.env` w katalogu głównym
+   (najłatwiej skopiować `.example.env`) lub przekazuj je przy wywołaniu `docker compose`.
 
 3. Domyślnie wolumen `./data` montowany jest do `/app/data` wewnątrz kontenera. Umożliwia to zachowanie wgrywanych dokumentów pomiędzy restartami. Dostosuj ścieżki lub usuń wolumen w `docker-compose.yml`, jeśli nie jest potrzebny.
 
