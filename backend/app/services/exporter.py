@@ -35,6 +35,18 @@ def generate_markdown(metadata: DocumentMetadata) -> str:
     _extend_with_list(lines, "Potencjalne kary", metadata.penalties)
     _extend_with_list(lines, "Kluczowe terminy", metadata.deadlines)
 
+    if metadata.simplified_sections:
+        lines.append("## Uproszczone brzmienie")
+        lines.append("")
+        for section in metadata.simplified_sections:
+            lines.append(f"### {section.identifier}")
+            lines.append("")
+            if section.source_excerpt:
+                lines.append(f"> {section.source_excerpt}")
+                lines.append("")
+            lines.append(section.plain_language.strip())
+            lines.append("")
+
     if metadata.pii_placeholders:
         lines.append("## Maskowane dane")
         lines.append("")

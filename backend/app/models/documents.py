@@ -10,6 +10,21 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 
+class SectionSimplification(BaseModel):
+    """Plain-language representation of a document fragment."""
+
+    identifier: str
+    source_excerpt: str
+    plain_language: str
+
+
+class DocumentSimplifiedResponse(BaseModel):
+    """Payload returned for simplified document views."""
+
+    document_id: UUID
+    sections: list[SectionSimplification] = Field(default_factory=list)
+
+
 class DocumentProcessingStatus(str, Enum):
     """Enumerate the high-level processing states for documents."""
 
@@ -34,6 +49,7 @@ class DocumentMetadata(BaseModel):
     deadlines: list[str] = Field(default_factory=list)
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
     pii_secret_path: Path | None = None
+    simplified_sections: list[SectionSimplification] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 
     def to_public(self) -> "DocumentMetadataPublic":
@@ -49,6 +65,7 @@ class DocumentMetadata(BaseModel):
             penalties=list(self.penalties),
             deadlines=list(self.deadlines),
             pii_placeholders=dict(self.pii_placeholders),
+            simplified_sections=list(self.simplified_sections),
             extra=dict(self.extra),
         )
 
@@ -65,6 +82,7 @@ class DocumentMetadataPublic(BaseModel):
     penalties: list[str] = Field(default_factory=list)
     deadlines: list[str] = Field(default_factory=list)
     pii_placeholders: dict[str, list[str]] = Field(default_factory=dict)
+    simplified_sections: list[SectionSimplification] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

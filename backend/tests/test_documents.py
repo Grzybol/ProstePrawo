@@ -102,6 +102,13 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     serialized = json.dumps(data)
     assert "biuro@example.com" not in serialized
 
+    simplified_sections = data["simplified_sections"]
+    assert simplified_sections
+    first_section = simplified_sections[0]
+    assert first_section["plain_language"].startswith("W prostych słowach")
+    assert "należy" not in first_section["plain_language"].lower()
+    assert "<EMAIL_1>" in " ".join(section["plain_language"] for section in simplified_sections)
+
     metadata = documents_module.pipeline.get_document(document_id)
 
     from sqlite3 import connect
@@ -236,6 +243,30 @@ def test_markdown_export_returns_sanitized_content(client_and_modules):
     assert "<EMAIL_1>" in body
     assert "biuro@example.com" not in body
     assert "## Podsumowanie" in body
+    assert "## Uproszczone brzmienie" in body
+    assert "W prostych słowach" in body
+
+
+def test_simplified_endpoint_exposes_plain_language_sections(client_and_modules):
+    client, _ = client_and_modules
+    payload = (
+        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
+        "Art. 2. Kara umowna wynosi 5000 zł."
+    ).encode()
+
+    response = client.post("/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    simplified_response = client.get(f"/documents/{document_id}/simplified")
+    assert simplified_response.status_code == 200
+    simplified = simplified_response.json()
+    assert simplified["document_id"] == str(document_id)
+    assert simplified["sections"]
+    plain_texts = [section["plain_language"] for section in simplified["sections"]]
+    assert any(text.startswith("W prostych słowach") for text in plain_texts)
+    assert all("należy" not in text.lower() for text in plain_texts)
+    assert any("5000" in text for text in plain_texts)
 
 
 def test_export_rejects_unsupported_format(client_and_modules):

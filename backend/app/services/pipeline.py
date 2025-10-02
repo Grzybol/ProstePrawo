@@ -11,7 +11,11 @@ from uuid import UUID
 from fastapi import UploadFile
 
 from ..core.config import get_settings
-from ..models.documents import DocumentMetadata, DocumentProcessingStatus
+from ..models.documents import (
+    DocumentMetadata,
+    DocumentProcessingStatus,
+    SectionSimplification,
+)
 from ..repositories import DocumentRepository
 from . import exporter, inference, ingestion, indexing, sanitizer
 
@@ -101,6 +105,7 @@ class DocumentPipeline:
             metadata.obligations = inference.extract_obligations(sanitized.text)
             metadata.penalties = inference.extract_penalties(sanitized.text)
             metadata.deadlines = inference.extract_deadlines(sanitized.text)
+            metadata.simplified_sections = inference.simplify_sections(sanitized_sections)
             metadata.status = DocumentProcessingStatus.READY
             self.repository.upsert(metadata)
         except Exception as exc:  # pragma: no cover - defensive path
@@ -141,6 +146,12 @@ class DocumentPipeline:
 
     def get_document(self, document_id: UUID) -> DocumentMetadata:
         return self._get(document_id)
+
+    def get_simplified_sections(self, document_id: UUID) -> list[SectionSimplification]:
+        metadata = self._get(document_id)
+        if metadata.status != DocumentProcessingStatus.READY:
+            raise DocumentNotReadyError(document_id)
+        return list(metadata.simplified_sections)
 
     async def _persist_upload(self, file: UploadFile, metadata: DocumentMetadata) -> None:
         filename = Path(file.filename).name if file.filename else "document"

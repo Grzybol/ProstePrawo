@@ -7,8 +7,8 @@ from fastapi.responses import PlainTextResponse
 
 from ...models.documents import (
     DocumentCreateResponse,
-    DocumentMetadata,
     DocumentMetadataPublic,
+    DocumentSimplifiedResponse,
 )
 from ...services.pipeline import (
     DocumentNotFoundError,
@@ -80,3 +80,20 @@ async def export_document(document_id: UUID, format: str = "markdown") -> PlainT
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     media_type = "text/markdown" if format.lower() == "markdown" else "text/plain"
     return PlainTextResponse(content, media_type=media_type)
+
+
+@router.get(
+    "/{document_id}/simplified",
+    summary="Retrieve plain-language sections for a document",
+    response_model=DocumentSimplifiedResponse,
+)
+async def get_simplified_document(document_id: UUID) -> DocumentSimplifiedResponse:
+    """Return sanitized excerpts paired with simplified explanations."""
+
+    try:
+        sections = pipeline.get_simplified_sections(document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document not found") from exc
+    except DocumentNotReadyError as exc:
+        raise HTTPException(status_code=409, detail="Document is still processing") from exc
+    return DocumentSimplifiedResponse(document_id=document_id, sections=sections)
