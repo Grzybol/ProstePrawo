@@ -15,6 +15,7 @@ class SectionSimplification(BaseModel):
 
     identifier: str
     source_excerpt: str
+    source_text: str = ""
     plain_language: str
 
 

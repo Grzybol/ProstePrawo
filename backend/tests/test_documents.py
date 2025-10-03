@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import io
 import json
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
+from zipfile import ZipFile
 
 
 @pytest.fixture
@@ -113,6 +115,7 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert first_section["plain_language"].startswith("W prostych słowach")
     assert "należy" not in first_section["plain_language"].lower()
     assert "<EMAIL_1>" in " ".join(section["plain_language"] for section in simplified_sections)
+    assert first_section["source_text"].startswith("Na potrzeby regulaminu")
 
     definitions = data["definitions"]
     assert any(entry["term"] == "Usługodawca" for entry in definitions)
@@ -146,6 +149,11 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     )
     answer = qa_response.json()["answer"]
     assert "Źródła" in answer
+
+    simplified_payload = client.get(f"/documents/{document_id}/simplified")
+    simplified_payload.raise_for_status()
+    simplified_data = simplified_payload.json()
+    assert simplified_data["sections"][0]["source_text"].startswith("Na potrzeby regulaminu")
 
 
 def test_document_listing_does_not_expose_paths(client_and_modules):
@@ -189,6 +197,65 @@ def test_repository_survives_restart(client_and_modules):
 
     answer = asyncio.run(new_pipeline.answer_question(document_id, "Jakie są obowiązki stron?"))
     assert "obowiąz" in answer.lower()
+
+
+def test_export_endpoints_support_formats_and_restore(client_and_modules):
+    client, documents_module = client_and_modules
+    payload = (
+        "Umowa zawiera dane kontaktowe: biuro@example.com.\n"
+        "Art. 1. Należy przesłać dokumenty w terminie 5 dni."
+    ).encode("utf-8")
+    response = client.post("/documents/", files={"file": ("umowa.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    markdown = client.get(f"/documents/{document_id}/export", params={"format": "markdown"})
+    assert markdown.status_code == 200
+    assert markdown.headers["content-type"].startswith("text/markdown")
+    assert "<EMAIL_" in markdown.text
+
+    restored = client.get(
+        f"/documents/{document_id}/export",
+        params={"format": "markdown", "restore_pii": "true"},
+    )
+    assert restored.status_code == 200
+    assert "biuro@example.com" in restored.text
+
+    pdf_export = client.get(f"/documents/{document_id}/export", params={"format": "pdf"})
+    assert pdf_export.status_code == 200
+    assert pdf_export.headers["content-type"] == "application/pdf"
+    assert pdf_export.content.startswith(b"%PDF")
+
+    docx_export = client.get(f"/documents/{document_id}/export", params={"format": "docx"})
+    assert docx_export.status_code == 200
+    assert docx_export.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument"
+    )
+    with ZipFile(io.BytesIO(docx_export.content)) as archive:
+        with archive.open("word/document.xml") as xml_document:
+            xml_payload = xml_document.read().decode("utf-8")
+    assert "Umowa" in xml_payload
+
+    metadata = documents_module.pipeline.get_document(document_id)
+    assert metadata.pii_secret_path and metadata.pii_secret_path.exists()
+
+
+def test_export_restore_requires_secret_map(client_and_modules):
+    client, documents_module = client_and_modules
+    payload = "Kontakt: osoba@example.com".encode("utf-8")
+    response = client.post("/documents/", files={"file": ("kontakt.txt", payload, "text/plain")})
+    document_id = UUID(response.json()["document_id"])
+    _wait_for_status(client, document_id, "ready")
+
+    metadata = documents_module.pipeline.get_document(document_id)
+    assert metadata.pii_secret_path is not None
+    metadata.pii_secret_path.unlink()
+
+    restore_attempt = client.get(
+        f"/documents/{document_id}/export", params={"format": "markdown", "restore_pii": "true"}
+    )
+    assert restore_attempt.status_code == 400
+    assert "unavailable" in restore_attempt.json()["detail"].lower()
 
 
 def test_indexing_is_isolated_between_documents(client_and_modules):

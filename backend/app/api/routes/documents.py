@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from ...models.documents import (
     DocumentCreateResponse,
@@ -68,21 +68,28 @@ async def ask_question(document_id: UUID, question: str) -> dict[str, str]:
 @router.get(
     "/{document_id}/export",
     summary="Generate a lightweight export for a document",
-    response_class=PlainTextResponse,
 )
-async def export_document(document_id: UUID, format: str = "markdown") -> PlainTextResponse:
+async def export_document(
+    document_id: UUID, format: str = "markdown", restore_pii: bool = False
+) -> Response:
     """Return a Markdown representation of the processed document."""
 
     try:
-        content = await pipeline.export_document(document_id=document_id, format=format)
+        artefact = await pipeline.export_document(
+            document_id=document_id, format=format, restore_pii=restore_pii
+        )
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
     except DocumentNotReadyError as exc:
         raise HTTPException(status_code=409, detail="Document is still processing") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    media_type = "text/markdown" if format.lower() == "markdown" else "text/plain"
-    return PlainTextResponse(content, media_type=media_type)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{artefact.filename}"'
+    }
+    if artefact.media_type.startswith("text/"):
+        return PlainTextResponse(artefact.content.decode("utf-8"), media_type=artefact.media_type, headers=headers)
+    return Response(content=artefact.content, media_type=artefact.media_type, headers=headers)
 
 
 @router.get(

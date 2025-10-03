@@ -109,6 +109,7 @@ def simplify_sections(sections: Iterable[DocumentSection]) -> list[SectionSimpli
             SectionSimplification(
                 identifier=section.identifier,
                 source_excerpt=excerpt,
+                source_text=section.text,
                 plain_language=plain_text,
             )
         )

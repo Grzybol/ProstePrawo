@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import os
 from collections.abc import Iterable
@@ -18,6 +19,15 @@ from ..models.documents import (
 )
 from ..repositories import DocumentRepository
 from . import exporter, inference, ingestion, indexing, sanitizer
+
+
+@dataclass(slots=True)
+class ExportArtefact:
+    """Binary representation of an exported document."""
+
+    filename: str
+    media_type: str
+    content: bytes
 
 
 class DocumentNotFoundError(KeyError):
@@ -133,15 +143,47 @@ class DocumentPipeline:
             return f"{answer.content} Źródła: {sources}."
         return answer.content
 
-    async def export_document(self, document_id: UUID, format: str = "markdown") -> str:
+    async def export_document(
+        self,
+        document_id: UUID,
+        format: str = "markdown",
+        restore_pii: bool = False,
+    ) -> ExportArtefact:
         """Generate an export artefact for ``document_id`` in the given ``format``."""
 
         metadata = self._get(document_id)
         if metadata.status != DocumentProcessingStatus.READY:
             raise DocumentNotReadyError(document_id)
-        if format.lower() != "markdown":
+
+        normalised = format.lower()
+        supported = {"markdown", "pdf", "docx"}
+        if normalised not in supported:
             raise ValueError(f"Unsupported export format: {format}")
-        return await asyncio.to_thread(exporter.generate_markdown, metadata)
+
+        if restore_pii and (not metadata.pii_secret_path or not metadata.pii_secret_path.exists()):
+            raise ValueError("Original PII mapping is unavailable for this document")
+
+        if normalised == "markdown":
+            payload = await asyncio.to_thread(exporter.generate_markdown, metadata, restore_pii=restore_pii)
+            return ExportArtefact(
+                filename=f"{document_id}.md",
+                media_type="text/markdown",
+                content=payload.encode("utf-8"),
+            )
+        if normalised == "pdf":
+            payload = await asyncio.to_thread(exporter.generate_pdf, metadata, restore_pii=restore_pii)
+            return ExportArtefact(
+                filename=f"{document_id}.pdf",
+                media_type="application/pdf",
+                content=payload,
+            )
+
+        payload = await asyncio.to_thread(exporter.generate_docx, metadata, restore_pii=restore_pii)
+        return ExportArtefact(
+            filename=f"{document_id}.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            content=payload,
+        )
 
     def iter_documents(self) -> Iterable[DocumentMetadata]:
         return list(self.repository.list())
