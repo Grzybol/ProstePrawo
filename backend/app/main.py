@@ -4,6 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
+def _discover_project_root(start_path: Path | None = None) -> Path:
+    """Return the repository root that contains the built frontend assets."""
+
+    current = (start_path or Path(__file__).resolve())
+    if current.is_file():
+        current = current.parent
+
+    for directory in [current, *current.parents]:
+        if (directory / "frontend" / "dist").exists():
+            return directory.resolve()
+
+    return Path(__file__).resolve().parents[2]
+
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +26,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .api.routes import documents, health
 
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = _discover_project_root()
 FRONTEND_DIST_DIR = (BASE_DIR / "frontend" / "dist").resolve()
 INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 
