@@ -34,8 +34,8 @@ def extract_document(path: Path) -> ExtractedDocument:
     operate in the test environment without heavyweight OCR dependencies.  For
     plain-text sources we simply decode the bytes using UTF-8 with fallback to
     latin-1.  For binary formats such as PDF we attempt a best-effort text
-    extraction using PyMuPDF when available; otherwise we fall back to decoding
-    whatever text layer may already be present in the file.
+    extraction using PyMuPDF when available, fall back to PyPDF2 when it is
+    installed, and only decode raw bytes if both strategies fail.
     """
 
     content = _read_text(path)
@@ -58,6 +58,20 @@ def _read_text(path: Path) -> str:
             finally:
                 doc.close()
         except Exception:  # pragma: no cover - import and runtime fallback
+            pass
+        try:
+            from PyPDF2 import PdfReader
+
+            reader = PdfReader(str(path))
+            text_chunks: list[str] = []
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                if page_text:
+                    text_chunks.append(page_text.strip())
+            if text_chunks:
+                return "\n".join(text_chunks)
+            return ""
+        except Exception:
             pass
     raw_bytes = path.read_bytes()
     try:
