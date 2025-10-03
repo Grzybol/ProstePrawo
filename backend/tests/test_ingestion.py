@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import base64
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -14,6 +15,29 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+_PDF_SAMPLE_BASE64 = (
+    "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4K"
+    "ZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4K"
+    "ZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAg"
+    "MCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVu"
+    "dHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUx"
+    "IC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTcgPj4K"
+    "c3RyZWFtCkJUIC9GMSAyNCBUZiA3MiA3MjAgVGQgKFRoaXMgaXMgYSB0aW55IFBERiBzYW1wbGUu"
+    "KSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAw"
+    "MDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMDY0IDAwMDAwIG4gCjAwMDAwMDAxMjEgMDAwMDAgbiAK"
+    "MDAwMDAwMDI0NyAwMDAwMCBuIAowMDAwMDAwMzE3IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUg"
+    "NiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDI0CiUlRU9GCg=="
+)
+
+
+@pytest.fixture()
+def pdf_with_text(tmp_path: Path) -> Path:
+    pdf_bytes = base64.b64decode(_PDF_SAMPLE_BASE64)
+    path = tmp_path / "sample.pdf"
+    path.write_bytes(pdf_bytes)
+    return path
 
 
 def test_section_numbering_starts_at_one(tmp_path):
@@ -112,6 +136,7 @@ def test_pipeline_persists_only_placeholders(tmp_path, monkeypatch):
         config.get_settings.cache_clear()
 
 
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not support POSIX permission checks")
 def test_secure_artifacts_have_restrictive_permissions(tmp_path, monkeypatch):
     pytest.importorskip("pydantic")
@@ -145,3 +170,12 @@ def test_secure_artifacts_have_restrictive_permissions(tmp_path, monkeypatch):
         assert file_mode == 0o600
     finally:
         config.get_settings.cache_clear()
+
+def test_extract_document_reads_pdf_text(pdf_with_text: Path):
+    pytest.importorskip("PyPDF2")
+    from app.services import ingestion
+
+    extracted = ingestion.extract_document(pdf_with_text)
+
+    assert "This is a tiny PDF sample." in extracted.text
+    assert any("tiny PDF sample" in section.text for section in extracted.sections)
