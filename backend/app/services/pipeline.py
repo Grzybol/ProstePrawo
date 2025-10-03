@@ -19,6 +19,7 @@ from ..models.documents import (
 )
 from ..repositories import DocumentRepository
 from . import exporter, inference, ingestion, indexing, sanitizer
+from .openai_client import OpenAIClientError
 
 
 @dataclass(slots=True)
@@ -111,12 +112,25 @@ class DocumentPipeline:
             )
             await asyncio.to_thread(self._indexer.index, document_id, sanitized_sections)
 
-            metadata.summary = inference.build_summary(sanitized.text)
-            metadata.obligations = inference.extract_obligations(sanitized.text)
-            metadata.penalties = inference.extract_penalties(sanitized.text)
-            metadata.deadlines = inference.extract_deadlines(sanitized.text)
-            metadata.risks = inference.extract_risks(sanitized.text)
-            metadata.simplified_sections = inference.simplify_sections(sanitized_sections)
+            use_cloud = self._settings.enable_cloud_llm
+            try:
+                metadata.summary = inference.build_summary(sanitized.text, use_cloud=use_cloud)
+                metadata.obligations = inference.extract_obligations(sanitized.text, use_cloud=use_cloud)
+                metadata.penalties = inference.extract_penalties(sanitized.text, use_cloud=use_cloud)
+                metadata.deadlines = inference.extract_deadlines(sanitized.text, use_cloud=use_cloud)
+                metadata.risks = inference.extract_risks(sanitized.text, use_cloud=use_cloud)
+                metadata.simplified_sections = inference.simplify_sections(
+                    sanitized_sections, use_cloud=use_cloud
+                )
+            except OpenAIClientError:
+                metadata.summary = inference.build_summary(sanitized.text, use_cloud=False)
+                metadata.obligations = inference.extract_obligations(sanitized.text, use_cloud=False)
+                metadata.penalties = inference.extract_penalties(sanitized.text, use_cloud=False)
+                metadata.deadlines = inference.extract_deadlines(sanitized.text, use_cloud=False)
+                metadata.risks = inference.extract_risks(sanitized.text, use_cloud=False)
+                metadata.simplified_sections = inference.simplify_sections(
+                    sanitized_sections, use_cloud=False
+                )
             metadata.definitions = inference.extract_definitions(sanitized.text)
             metadata.status = DocumentProcessingStatus.READY
             self.repository.upsert(metadata)
@@ -137,7 +151,11 @@ class DocumentPipeline:
                 "Na podstawie zapisanych obowiązków dokument wskazuje: "
                 f"{obligations}"
             )
-        answer = inference.answer_question(question, retrieved)
+        use_cloud = self._settings.enable_cloud_llm
+        try:
+            answer = inference.answer_question(question, retrieved, use_cloud=use_cloud)
+        except OpenAIClientError:
+            answer = inference.answer_question(question, retrieved, use_cloud=False)
         if answer.sources:
             sources = ", ".join(answer.sources)
             return f"{answer.content} Źródła: {sources}."

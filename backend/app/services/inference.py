@@ -1,4 +1,4 @@
-"""Rule-based inference utilities used in lieu of the final LLM stage."""
+"""Rule-based inference utilities with optional OpenAI integration."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,9 +6,11 @@ import re
 import textwrap
 from typing import Iterable
 
+from ..core.config import get_settings
 from ..models.documents import DocumentDefinition, SectionSimplification
 from .indexing import RetrievedChunk
 from .ingestion import DocumentSection
+from .openai_client import OpenAIClientError, get_openai_client
 
 
 @dataclass(slots=True)
@@ -19,9 +21,13 @@ class QaAnswer:
     sources: list[str]
 
 
-def build_summary(text: str) -> str:
-    """Create a deterministic short summary from the sanitised text."""
+def _should_use_cloud(use_cloud: bool | None) -> bool:
+    if use_cloud is not None:
+        return use_cloud
+    return get_settings().enable_cloud_llm
 
+
+def _build_summary_local(text: str) -> str:
     paragraphs = [paragraph.strip() for paragraph in text.splitlines() if paragraph.strip()]
     if not paragraphs:
         return "Brak treści do podsumowania."
@@ -29,6 +35,20 @@ def build_summary(text: str) -> str:
     if len(first) > 280:
         first = first[:277] + "..."
     return first
+
+
+def build_summary(text: str, use_cloud: bool | None = None) -> str:
+    """Return a short summary, preferring OpenAI when available."""
+
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            summary = client.summarise(text)
+            if summary:
+                return summary
+        except OpenAIClientError:
+            pass
+    return _build_summary_local(text)
 
 
 def _collect_sentences(text: str, keywords: Iterable[str]) -> list[str]:
@@ -43,27 +63,75 @@ def _collect_sentences(text: str, keywords: Iterable[str]) -> list[str]:
     return sentences
 
 
-def extract_obligations(text: str) -> list[str]:
+def extract_obligations(text: str, use_cloud: bool | None = None) -> list[str]:
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            obligations = client.extract_items(text, "obowiązki")
+            if obligations:
+                return obligations
+        except OpenAIClientError:
+            pass
     return _collect_sentences(text, ["zobowiąz", "obowiąz", "należy"])
 
 
-def extract_penalties(text: str) -> list[str]:
+def extract_penalties(text: str, use_cloud: bool | None = None) -> list[str]:
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            penalties = client.extract_items(text, "kary lub sankcje")
+            if penalties:
+                return penalties
+        except OpenAIClientError:
+            pass
     return _collect_sentences(text, ["kara", "odpowiedzialn", "grzywna"])
 
 
-def extract_deadlines(text: str) -> list[str]:
+def extract_deadlines(text: str, use_cloud: bool | None = None) -> list[str]:
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            deadlines = client.extract_items(text, "terminy lub daty graniczne")
+            if deadlines:
+                return deadlines
+        except OpenAIClientError:
+            pass
     return _collect_sentences(text, ["termin", "dni", "miesiąc", "miesiac"])
 
 
-def extract_risks(text: str) -> list[str]:
+def extract_risks(text: str, use_cloud: bool | None = None) -> list[str]:
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            risks = client.extract_items(text, "ryzyka dla stron umowy")
+            if risks:
+                return risks
+        except OpenAIClientError:
+            pass
     return _collect_sentences(text, ["ryzyk", "zagroż", "niebezpiecz", "utrata", "szkody"])
 
 
-def answer_question(question: str, retrieved_chunks: list[RetrievedChunk]) -> QaAnswer:
+def answer_question(
+    question: str, retrieved_chunks: list[RetrievedChunk], use_cloud: bool | None = None
+) -> QaAnswer:
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            result = client.answer_question(question, retrieved_chunks)
+            content = str(result.get("answer", "")).strip()
+            if content:
+                sources = [str(source) for source in result.get("sources", []) if str(source).strip()]
+                return QaAnswer(content=content, sources=sources)
+        except OpenAIClientError:
+            pass
+    return _answer_question_local(question, retrieved_chunks)
+
+
+def _answer_question_local(question: str, retrieved_chunks: list[RetrievedChunk]) -> QaAnswer:
     if not retrieved_chunks:
         return QaAnswer(content="Brak danych pozwalających na udzielenie odpowiedzi.", sources=[])
     best = retrieved_chunks[0]
-    summary = build_summary(best.text)
+    summary = _build_summary_local(best.text)
     content = (
         f"Na podstawie sekcji '{best.identifier}' odpowiedź brzmi: {summary} "
         "(odpowiedź wygenerowana heurystycznie)."
@@ -98,9 +166,43 @@ _REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
-def simplify_sections(sections: Iterable[DocumentSection]) -> list[SectionSimplification]:
-    """Generate naive plain-language explanations for document sections."""
+def simplify_sections(
+    sections: Iterable[DocumentSection], use_cloud: bool | None = None
+) -> list[SectionSimplification]:
+    """Generate plain-language explanations using OpenAI when enabled."""
 
+    section_list = list(sections)
+    if _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            ai_results = client.simplify_sections(section_list)
+            mapped = {section.identifier: section for section in section_list}
+            simplifications: list[SectionSimplification] = []
+            for item in ai_results:
+                identifier = item.get("identifier")
+                if not identifier:
+                    continue
+                identifier = str(identifier)
+                source_section = mapped.get(identifier)
+                source_text = source_section.text if source_section else ""
+                excerpt_raw = item.get("source_excerpt")
+                excerpt = str(excerpt_raw) if excerpt_raw is not None else ""
+                simplifications.append(
+                    SectionSimplification(
+                        identifier=identifier,
+                        source_excerpt=(excerpt or _create_excerpt(source_text)),
+                        source_text=source_text,
+                        plain_language=str(item.get("plain_language", "")),
+                    )
+                )
+            if simplifications:
+                return simplifications
+        except OpenAIClientError:
+            pass
+    return _simplify_sections_local(section_list)
+
+
+def _simplify_sections_local(sections: Iterable[DocumentSection]) -> list[SectionSimplification]:
     simplifications: list[SectionSimplification] = []
     for section in sections:
         plain_text = _simplify_text(section.text)
