@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from typing import Any, Iterable
 
@@ -10,6 +11,9 @@ from openai import OpenAI
 from ..core.config import get_settings
 from .indexing import RetrievedChunk
 from .ingestion import DocumentSection
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClientError(RuntimeError):
@@ -25,6 +29,7 @@ class OpenAIClient:
         self._model = settings.openai_model
 
     def summarise(self, text: str) -> str:
+        logger.debug("Requesting OpenAI summary (%d chars)", len(text))
         messages = [
             {
                 "role": "system",
@@ -41,9 +46,12 @@ class OpenAIClient:
                 ),
             },
         ]
-        return self._complete(messages, max_tokens=300)
+        summary = self._complete(messages, max_tokens=300)
+        logger.debug("Received OpenAI summary response (%d chars)", len(summary))
+        return summary
 
     def extract_items(self, text: str, category: str) -> list[str]:
+        logger.debug("Requesting OpenAI extraction for '%s' (%d chars)", category, len(text))
         messages = [
             {
                 "role": "system",
@@ -62,6 +70,11 @@ class OpenAIClient:
             },
         ]
         data = self._complete_json(messages, max_tokens=400)
+        logger.debug(
+            "Received OpenAI extraction response for '%s': %s",
+            category,
+            data,
+        )
         if not isinstance(data, list):
             raise OpenAIClientError("Nieprawidłowy format odpowiedzi dla listy elementów.")
         cleaned: list[str] = []
@@ -98,7 +111,14 @@ class OpenAIClient:
                 ),
             },
         ]
+        logger.debug("Requesting OpenAI simplification for %d sections", len(payload))
         data = self._complete_json(messages, max_tokens=1200)
+        if isinstance(data, list):
+            logger.debug("Received OpenAI simplification response with %d items", len(data))
+        else:
+            logger.debug(
+                "Received OpenAI simplification response of type %s", type(data).__name__
+            )
         if not isinstance(data, list):
             raise OpenAIClientError("Oczekiwano tablicy z uproszczeniami sekcji.")
         results: list[dict[str, str]] = []
@@ -150,7 +170,13 @@ class OpenAIClient:
                 ),
             },
         ]
+        logger.debug(
+            "Requesting OpenAI answer (question length: %d, context items: %d)",
+            len(question),
+            len(context),
+        )
         data = self._complete_json(messages, max_tokens=600)
+        logger.debug("Received OpenAI answer response: %s", data)
         if not isinstance(data, dict):
             raise OpenAIClientError("Niepoprawny format odpowiedzi dla Q&A.")
         answer = str(data.get("answer", "")).strip()
@@ -165,6 +191,12 @@ class OpenAIClient:
 
     def _complete(self, messages: list[dict[str, str]], *, max_tokens: int = 512, temperature: float = 0.2) -> str:
         try:
+            logger.debug(
+                "Calling OpenAI chat completion (model=%s, max_tokens=%d, temperature=%.2f)",
+                self._model,
+                max_tokens,
+                temperature,
+            )
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
@@ -172,21 +204,26 @@ class OpenAIClient:
                 max_tokens=max_tokens,
             )
         except Exception as exc:  # pragma: no cover - network failure path
+            logger.exception("OpenAI chat completion failed")
             raise OpenAIClientError("Nie udało się wywołać OpenAI API.") from exc
         choices = getattr(response, "choices", None)
         if not choices:
+            logger.error("OpenAI response did not include choices")
             raise OpenAIClientError("OpenAI nie zwróciło żadnych wyników.")
         message = choices[0].message
         content = getattr(message, "content", None)
         if not content:
+            logger.error("OpenAI response message missing content")
             raise OpenAIClientError("Odpowiedź OpenAI nie zawiera treści.")
         return str(content).strip()
 
     def _complete_json(self, messages: list[dict[str, str]], *, max_tokens: int = 512) -> Any:
         content = self._complete(messages, max_tokens=max_tokens)
         try:
-            return json.loads(content)
+            parsed = json.loads(content)
+            return parsed
         except json.JSONDecodeError as exc:
+            logger.error("Failed to decode OpenAI JSON response: %s", content, exc_info=True)
             raise OpenAIClientError("Nie udało się zinterpretować odpowiedzi jako JSON.") from exc
 
 

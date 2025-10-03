@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 
 def _discover_project_root(start_path: Path | None = None) -> Path:

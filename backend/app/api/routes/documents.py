@@ -1,5 +1,6 @@
 """Document lifecycle endpoints."""
 from collections.abc import Iterable
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -19,6 +20,8 @@ from ...services.pipeline import (
     DocumentPipeline,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 pipeline = DocumentPipeline()
@@ -27,7 +30,9 @@ pipeline = DocumentPipeline()
 @router.post("/", summary="Upload a document for processing", response_model=DocumentCreateResponse)
 async def upload_document(file: UploadFile) -> DocumentCreateResponse:
     """Persist an uploaded file and trigger asynchronous processing."""
+    logger.info("Received upload request for %s", file.filename)
     document = await pipeline.ingest(file)
+    logger.info("Document %s accepted for processing", document.document_id)
     return DocumentCreateResponse(document_id=document.document_id, status=document.status)
 
 
@@ -38,6 +43,7 @@ async def upload_document(file: UploadFile) -> DocumentCreateResponse:
 )
 async def list_documents() -> Iterable[DocumentMetadataPublic]:
     """Return metadata for all processed documents in the local store."""
+    logger.debug("Listing processed documents")
     return [document.to_public() for document in pipeline.iter_documents()]
 
 
@@ -51,17 +57,22 @@ async def get_document(document_id: UUID) -> DocumentMetadataPublic:
     try:
         document = pipeline.get_document(document_id)
     except DocumentNotFoundError as exc:
+        logger.warning("Requested metadata for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
+    logger.debug("Returning metadata for %s", document_id)
     return document.to_public()
 
 
 @router.get("/{document_id}/qa", summary="Ask a question about a document")
 async def ask_question(document_id: UUID, question: str) -> dict[str, str]:
     """Provide a lightweight placeholder for document Q&A functionality."""
+    logger.info("Received Q&A request for %s", document_id)
     try:
         answer = await pipeline.answer_question(document_id=document_id, question=question)
     except DocumentNotFoundError as exc:
+        logger.warning("Q&A requested for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
+    logger.debug("Returning Q&A response for %s", document_id)
     return {"answer": answer}
 
 
@@ -79,10 +90,15 @@ async def export_document(
             document_id=document_id, format=format, restore_pii=restore_pii
         )
     except DocumentNotFoundError as exc:
+        logger.warning("Export requested for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
     except DocumentNotReadyError as exc:
+        logger.info("Export requested for processing document %s", document_id)
         raise HTTPException(status_code=409, detail="Document is still processing") from exc
     except ValueError as exc:
+        logger.warning(
+            "Export request for %s failed due to invalid input: %s", document_id, exc
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     headers = {
         "Content-Disposition": f'attachment; filename="{artefact.filename}"'
@@ -103,9 +119,12 @@ async def get_simplified_document(document_id: UUID) -> DocumentSimplifiedRespon
     try:
         sections = pipeline.get_simplified_sections(document_id)
     except DocumentNotFoundError as exc:
+        logger.warning("Simplified view requested for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
     except DocumentNotReadyError as exc:
+        logger.info("Simplified view requested for processing document %s", document_id)
         raise HTTPException(status_code=409, detail="Document is still processing") from exc
+    logger.debug("Returning simplified sections for %s", document_id)
     return DocumentSimplifiedResponse(document_id=document_id, sections=sections)
 
 
@@ -120,9 +139,12 @@ async def get_definitions(document_id: UUID) -> DocumentDefinitionsResponse:
     try:
         metadata = pipeline.get_document(document_id)
     except DocumentNotFoundError as exc:
+        logger.warning("Definitions requested for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
     if metadata.status != DocumentProcessingStatus.READY:
+        logger.info("Definitions requested for processing document %s", document_id)
         raise HTTPException(status_code=409, detail="Document is still processing")
+    logger.debug("Returning definitions for %s", document_id)
     return DocumentDefinitionsResponse(document_id=document_id, definitions=metadata.definitions)
 
 
@@ -137,7 +159,10 @@ async def get_insights(document_id: UUID) -> DocumentInsightsResponse:
     try:
         insights = pipeline.get_document_insights(document_id)
     except DocumentNotFoundError as exc:
+        logger.warning("Insights requested for missing document %s", document_id)
         raise HTTPException(status_code=404, detail="Document not found") from exc
     except DocumentNotReadyError as exc:
+        logger.info("Insights requested for processing document %s", document_id)
         raise HTTPException(status_code=409, detail="Document is still processing") from exc
+    logger.debug("Returning insights for %s", document_id)
     return DocumentInsightsResponse(document_id=document_id, **insights)
