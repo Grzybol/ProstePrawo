@@ -7,7 +7,23 @@ import textwrap
 from typing import Iterable
 
 from ..core.config import get_settings
-from ..models.documents import DocumentDefinition, SectionSimplification
+from ..models.documents import DocumentDefinition, DocumentUsageMetrics, SectionSimplification
+
+
+def _usage_from_payload(payload: dict[str, int] | None) -> DocumentUsageMetrics:
+    prompt = int(payload.get("prompt_tokens", 0)) if payload else 0
+    completion = int(payload.get("completion_tokens", 0)) if payload else 0
+    total_value = payload.get("total_tokens") if payload else None
+    total = int(total_value) if total_value is not None else prompt + completion
+    return DocumentUsageMetrics(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=total,
+    )
+
+
+def _zero_usage() -> DocumentUsageMetrics:
+    return DocumentUsageMetrics()
 from .indexing import RetrievedChunk
 from .ingestion import DocumentSection
 from .openai_client import OpenAIClientError, get_openai_client
@@ -37,18 +53,18 @@ def _build_summary_local(text: str) -> str:
     return first
 
 
-def build_summary(text: str, use_cloud: bool | None = None) -> str:
+def build_summary(text: str, use_cloud: bool | None = None) -> tuple[str, DocumentUsageMetrics]:
     """Return a short summary, preferring OpenAI when available."""
 
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            summary = client.summarise(text)
+            summary, usage = client.summarise(text)
             if summary:
-                return summary
+                return summary, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _build_summary_local(text)
+    return _build_summary_local(text), _zero_usage()
 
 
 def _collect_sentences(text: str, keywords: Iterable[str]) -> list[str]:
@@ -63,52 +79,52 @@ def _collect_sentences(text: str, keywords: Iterable[str]) -> list[str]:
     return sentences
 
 
-def extract_obligations(text: str, use_cloud: bool | None = None) -> list[str]:
+def extract_obligations(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            obligations = client.extract_items(text, "obowiązki")
+            obligations, usage = client.extract_items(text, "obowiązki")
             if obligations:
-                return obligations
+                return obligations, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _collect_sentences(text, ["zobowiąz", "obowiąz", "należy"])
+    return _collect_sentences(text, ["zobowiąz", "obowiąz", "należy"]), _zero_usage()
 
 
-def extract_penalties(text: str, use_cloud: bool | None = None) -> list[str]:
+def extract_penalties(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            penalties = client.extract_items(text, "kary lub sankcje")
+            penalties, usage = client.extract_items(text, "kary lub sankcje")
             if penalties:
-                return penalties
+                return penalties, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _collect_sentences(text, ["kara", "odpowiedzialn", "grzywna"])
+    return _collect_sentences(text, ["kara", "odpowiedzialn", "grzywna"]), _zero_usage()
 
 
-def extract_deadlines(text: str, use_cloud: bool | None = None) -> list[str]:
+def extract_deadlines(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            deadlines = client.extract_items(text, "terminy lub daty graniczne")
+            deadlines, usage = client.extract_items(text, "terminy lub daty graniczne")
             if deadlines:
-                return deadlines
+                return deadlines, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _collect_sentences(text, ["termin", "dni", "miesiąc", "miesiac"])
+    return _collect_sentences(text, ["termin", "dni", "miesiąc", "miesiac"]), _zero_usage()
 
 
-def extract_risks(text: str, use_cloud: bool | None = None) -> list[str]:
+def extract_risks(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            risks = client.extract_items(text, "ryzyka dla stron umowy")
+            risks, usage = client.extract_items(text, "ryzyka dla stron umowy")
             if risks:
-                return risks
+                return risks, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _collect_sentences(text, ["ryzyk", "zagroż", "niebezpiecz", "utrata", "szkody"])
+    return _collect_sentences(text, ["ryzyk", "zagroż", "niebezpiecz", "utrata", "szkody"]), _zero_usage()
 
 
 def answer_question(
@@ -117,7 +133,7 @@ def answer_question(
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            result = client.answer_question(question, retrieved_chunks)
+            result, _usage = client.answer_question(question, retrieved_chunks)
             content = str(result.get("answer", "")).strip()
             if content:
                 sources = [str(source) for source in result.get("sources", []) if str(source).strip()]
@@ -168,14 +184,14 @@ _REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 def simplify_sections(
     sections: Iterable[DocumentSection], use_cloud: bool | None = None
-) -> list[SectionSimplification]:
+) -> tuple[list[SectionSimplification], DocumentUsageMetrics]:
     """Generate plain-language explanations using OpenAI when enabled."""
 
     section_list = list(sections)
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
-            ai_results = client.simplify_sections(section_list)
+            ai_results, usage = client.simplify_sections(section_list)
             mapped = {section.identifier: section for section in section_list}
             simplifications: list[SectionSimplification] = []
             for item in ai_results:
@@ -196,10 +212,10 @@ def simplify_sections(
                     )
                 )
             if simplifications:
-                return simplifications
+                return simplifications, _usage_from_payload(usage)
         except OpenAIClientError:
             pass
-    return _simplify_sections_local(section_list)
+    return _simplify_sections_local(section_list), _zero_usage()
 
 
 def _simplify_sections_local(sections: Iterable[DocumentSection]) -> list[SectionSimplification]:

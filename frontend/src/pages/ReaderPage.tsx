@@ -3,7 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { API_BASE_URL } from '../config';
 import SectionViewer from '../components/SectionViewer';
 import QaModal from '../components/QaModal';
-import type { DocumentMetadataPublic, SectionSimplification, SimplifiedResponse } from '../types';
+import CostOverviewPanel from '../components/CostOverviewPanel';
+import type {
+  DocumentMetadataPublic,
+  SectionSimplification,
+  SimplifiedResponse
+} from '../types';
 
 function ReaderPage() {
   const { documentId } = useParams();
@@ -110,6 +115,7 @@ function ReaderPage() {
             onSelect={setActiveSection}
           />
           <aside className="reader-insights">
+            <CostOverviewPanel usage={metadata?.token_usage} isReady={ready} />
             <h2>Najważniejsze informacje</h2>
             {insights.map((group) => (
               <div key={group.label}>

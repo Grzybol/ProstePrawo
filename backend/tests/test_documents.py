@@ -106,6 +106,13 @@ def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
     assert "source_path" not in data
     assert "sanitized_path" not in data
     assert "pii_secret_path" not in data
+    assert "token_usage" in data
+    assert set(data["token_usage"].keys()) == {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cost_usd",
+    }
     serialized = json.dumps(data)
     assert "biuro@example.com" not in serialized
 
@@ -175,6 +182,13 @@ def test_document_listing_does_not_expose_paths(client_and_modules):
         assert "sanitized_path" not in entry
         assert "pii_secret_path" not in entry
         assert "risks" in entry
+        assert "token_usage" in entry
+        assert set(entry["token_usage"].keys()) == {
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cost_usd",
+        }
 
 
 def test_repository_survives_restart(client_and_modules):

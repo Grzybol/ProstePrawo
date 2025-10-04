@@ -10,6 +10,23 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 
+class DocumentUsageMetrics(BaseModel):
+    """Aggregate usage statistics for LLM calls executed per document."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+
+    def accumulate(self, other: "DocumentUsageMetrics") -> None:
+        """Add values from ``other`` to the current metrics in place."""
+
+        self.prompt_tokens += other.prompt_tokens
+        self.completion_tokens += other.completion_tokens
+        self.total_tokens += other.total_tokens
+        self.cost_usd += other.cost_usd
+
+
 class SectionSimplification(BaseModel):
     """Plain-language representation of a document fragment."""
 
@@ -62,6 +79,7 @@ class DocumentMetadata(BaseModel):
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
     definitions: list[DocumentDefinition] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
+    token_usage: DocumentUsageMetrics = Field(default_factory=DocumentUsageMetrics)
 
     def to_public(self) -> "DocumentMetadataPublic":
         """Expose a sanitized view suitable for API responses."""
@@ -80,6 +98,7 @@ class DocumentMetadata(BaseModel):
             simplified_sections=list(self.simplified_sections),
             definitions=list(self.definitions),
             extra=dict(self.extra),
+            token_usage=DocumentUsageMetrics(**self.token_usage.dict()),
         )
 
 
@@ -99,6 +118,7 @@ class DocumentMetadataPublic(BaseModel):
     simplified_sections: list[SectionSimplification] = Field(default_factory=list)
     definitions: list[DocumentDefinition] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
+    token_usage: DocumentUsageMetrics = Field(default_factory=DocumentUsageMetrics)
 
 
 class DocumentCreateResponse(BaseModel):

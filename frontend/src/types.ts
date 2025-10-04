@@ -7,6 +7,13 @@ export interface SectionSimplification {
   plain_language: string;
 }
 
+export interface TokenUsageMetrics {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
 export interface DocumentMetadataPublic {
   document_id: string;
   title: string;
@@ -18,6 +25,7 @@ export interface DocumentMetadataPublic {
   deadlines: string[];
   risks: string[];
   simplified_sections: SectionSimplification[];
+  token_usage: TokenUsageMetrics;
 }
 
 export interface DocumentListItem extends DocumentMetadataPublic {}

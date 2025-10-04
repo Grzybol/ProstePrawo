@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict
 
 try:  # pragma: no cover - compatibility with Pydantic v1
     from pydantic import AliasChoices, Field
@@ -63,6 +64,13 @@ class Settings(BaseSettings):
             if AliasChoices is not None
             else {}
         ),
+    )
+    openai_pricing: Dict[str, Dict[str, float]] = Field(
+        default_factory=lambda: {
+            "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
+            "default": {"prompt": 0.0004, "completion": 0.0008},
+        },
+        description="Per-model pricing (USD) per 1K prompt/completion tokens.",
     )
 
 
