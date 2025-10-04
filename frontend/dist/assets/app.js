@@ -117,6 +117,16 @@ function UploadZone({ onUploadComplete }) {
 }
 
 function DocumentList({ documents, isLoading, onRefresh }) {
+  const formatNumber = (value) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? value.toLocaleString('pl-PL')
+      : '—';
+
+  const formatCurrency = (value) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? value.toLocaleString('pl-PL', { style: 'currency', currency: 'USD' })
+      : '—';
+
   return e(
     'section',
     { className: 'panel' },
@@ -146,13 +156,47 @@ function DocumentList({ documents, isLoading, onRefresh }) {
           },
           e(
             'div',
-            null,
-            e('p', { className: 'document-title' }, document.title),
+            { className: 'document-info' },
             e(
-              'p',
-              { className: 'document-meta' },
-              `Utworzono: ${new Date(document.created_at).toLocaleString('pl-PL')} • Status: ${document.status}`
-            )
+              'div',
+              null,
+              e('p', { className: 'document-title' }, document.title),
+              e(
+                'p',
+                { className: 'document-meta' },
+                `Utworzono: ${new Date(document.created_at).toLocaleString('pl-PL')} • Status: ${document.status}`
+              )
+            ),
+            document.status === 'ready' && document.token_usage
+              ? e(
+                  'dl',
+                  { className: 'document-usage' },
+                  e(
+                    'div',
+                    null,
+                    e('dt', null, 'Prompt tokens'),
+                    e('dd', null, formatNumber(document.token_usage.prompt_tokens))
+                  ),
+                  e(
+                    'div',
+                    null,
+                    e('dt', null, 'Completion tokens'),
+                    e('dd', null, formatNumber(document.token_usage.completion_tokens))
+                  ),
+                  e(
+                    'div',
+                    null,
+                    e('dt', null, 'Łącznie tokenów'),
+                    e('dd', null, formatNumber(document.token_usage.total_tokens))
+                  ),
+                  e(
+                    'div',
+                    null,
+                    e('dt', null, 'Koszt'),
+                    e('dd', null, formatCurrency(document.token_usage.cost_usd))
+                  )
+                )
+              : null
           ),
           e(
             'div',

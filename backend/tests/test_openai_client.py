@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 
@@ -163,15 +163,69 @@ def test_extract_items_handles_markdown_json_response():
     assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
-def test_complete_json_raises_on_truncated_response(caplog):
-    response_content = "[\"Niedokonczona odpowiedz"
+def test_complete_json_retries_on_truncated_response(caplog):
+    calls: list[int] = []
 
-    class _LengthCompletions:
-        def create(self, **_: object):
+    class _RetryCompletions:
+        def __init__(self) -> None:
+            self._call_count = 0
+
+        def create(self, **kwargs: object):
+            calls.append(int(kwargs.get("max_tokens", 0)))
+            self._call_count += 1
+            if self._call_count == 1:
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content='["Niedokonczona odpowiedz"'),
+                            finish_reason="length",
+                        )
+                    ],
+                    usage=SimpleNamespace(
+                        prompt_tokens=10, completion_tokens=20, total_tokens=30
+                    ),
+                )
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        message=SimpleNamespace(content=response_content),
+                        message=SimpleNamespace(content='["Gotowe"]'),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=SimpleNamespace(
+                    prompt_tokens=5, completion_tokens=6, total_tokens=11
+                ),
+            )
+
+    client = OpenAIClient(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=_RetryCompletions()))
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result, usage = client._complete_json(
+            [{"role": "user", "content": "Test"}], max_tokens=50
+        )
+
+    assert result == ["Gotowe"]
+    assert usage == {"prompt_tokens": 15, "completion_tokens": 26, "total_tokens": 41}
+    assert calls[0] == 50
+    assert calls[1] >= 100
+    warning_messages = [
+        record.message for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert any("finish_reason=length" in message for message in warning_messages)
+
+
+def test_complete_json_raises_when_truncated_and_limit_reached(caplog):
+    calls: list[int] = []
+
+    class _LengthCompletions:
+        def create(self, **kwargs: object):
+            calls.append(int(kwargs.get("max_tokens", 0)))
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content='["Niedokonczona odpowiedz"'),
                         finish_reason="length",
                     )
                 ],
@@ -181,10 +235,13 @@ def test_complete_json_raises_on_truncated_response(caplog):
     client = OpenAIClient(
         client=SimpleNamespace(chat=SimpleNamespace(completions=_LengthCompletions()))
     )
+    client._model_token_limit = MethodType(lambda self: 64, client)
 
-    with caplog.at_level(logging.ERROR), pytest.raises(OpenAIClientError):
-        client._complete_json([{"role": "user", "content": "Test"}])
+    with caplog.at_level(logging.WARNING), pytest.raises(OpenAIClientError):
+        client._complete_json([{"role": "user", "content": "Test"}], max_tokens=64)
 
+    assert calls == [64]
+    warning_messages = [record.message for record in caplog.records if record.levelno == logging.WARNING]
     error_messages = [record.message for record in caplog.records if record.levelno == logging.ERROR]
-    assert any("finish_reason=length" in message for message in error_messages)
-    assert any(response_content in message for message in error_messages)
+    assert any("finish_reason=length" in message for message in warning_messages)
+    assert any("model token limit" in message for message in error_messages)
