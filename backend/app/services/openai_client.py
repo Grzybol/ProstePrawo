@@ -216,13 +216,7 @@ class OpenAIClient:
                 max_tokens=max_tokens,
             )
         except AuthenticationError as exc:  # pragma: no cover - network failure path
-            message = str(exc)
-            if ":" in message:
-                prefix, _ = message.split(":", 1)
-                message = f"{prefix}: [REDACTED]"
-            else:
-                message = "OpenAI authentication failed: [REDACTED]"
-            logger.warning(message)
+            logger.warning("OpenAI authentication failed: %s", exc)
             raise OpenAIClientError("Nie udało się uwierzytelnić w OpenAI API.") from exc
         except Exception as exc:  # pragma: no cover - network failure path
             logger.exception("OpenAI chat completion failed")

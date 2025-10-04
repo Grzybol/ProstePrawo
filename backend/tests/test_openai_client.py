@@ -32,7 +32,7 @@ class _FailingClient:
         self.chat = SimpleNamespace(completions=_FailingCompletions(exc))
 
 
-def test_complete_masks_authentication_error(caplog):
+def test_complete_logs_full_authentication_error(caplog):
     message = "Incorrect API key provided: sk-test123"
     client = OpenAIClient(client=_FailingClient(AuthenticationError(message)))
 
@@ -40,8 +40,8 @@ def test_complete_masks_authentication_error(caplog):
         client._complete([{"role": "user", "content": "Hello"}])
 
     assert any(record.levelno == logging.WARNING for record in caplog.records)
-    assert all("sk-test123" not in record.message for record in caplog.records)
-    assert any("[REDACTED]" in record.message for record in caplog.records)
+    assert any("sk-test123" in record.message for record in caplog.records)
+    assert all("[REDACTED]" not in record.message for record in caplog.records)
 
 
 def test_client_uses_api_key_from_env(monkeypatch, tmp_path):
@@ -68,6 +68,31 @@ def test_client_uses_api_key_from_env(monkeypatch, tmp_path):
         get_settings.cache_clear()
 
     assert captured.get("kwargs", {}).get("api_key") == "from_env"
+
+
+def test_client_prefers_env_file_over_environment(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=from_file\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "from_env")
+    monkeypatch.delenv("PROSTE_PRAWO_OPENAI_API_KEY", raising=False)
+    get_settings.cache_clear()
+    captured: dict[str, object] = {}
+
+    class _DummyOpenAI:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["kwargs"] = kwargs
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=lambda *a, **k: None)
+            )
+
+    monkeypatch.setattr("app.services.openai_client.OpenAI", _DummyOpenAI)
+    try:
+        OpenAIClient()
+    finally:
+        get_settings.cache_clear()
+
+    assert captured.get("kwargs", {}).get("api_key") == "from_file"
 
 
 def test_client_passes_project_when_available(monkeypatch):
