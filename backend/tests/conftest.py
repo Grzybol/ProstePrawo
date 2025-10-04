@@ -4,7 +4,53 @@ from __future__ import annotations
 """Pytest configuration and compatibility shims for the test suite."""
 
 import inspect
+import sys
+import types
 import typing
+
+
+def _ensure_pydantic_stubs() -> None:
+    if "pydantic" not in sys.modules:  # pragma: no cover - executed in CI without dependency
+        module = types.ModuleType("pydantic")
+
+        def Field(default=None, **kwargs):  # pragma: no cover - simple stub
+            return default
+
+        module.Field = Field
+        sys.modules["pydantic"] = module
+
+    if "pydantic_settings" not in sys.modules:  # pragma: no cover - executed in CI without dependency
+        module = types.ModuleType("pydantic_settings")
+
+        class BaseSettings:  # pragma: no cover - simple stub
+            def __init__(self, **kwargs) -> None:
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        module.BaseSettings = BaseSettings
+        sys.modules["pydantic_settings"] = module
+
+
+def _ensure_openai_stub() -> None:
+    try:
+        import openai  # noqa: F401  # pragma: no cover - optional dependency
+    except ModuleNotFoundError:  # pragma: no cover - executed in CI without openai
+        module = types.ModuleType("openai")
+
+        class AuthenticationError(Exception):
+            """Fallback authentication error used in tests."""
+
+        class _StubCompletions:  # pragma: no cover - simple stub
+            def create(self, *args, **kwargs):
+                raise RuntimeError("OpenAI API is not available in the test environment.")
+
+        class OpenAI:  # pragma: no cover - simple stub
+            def __init__(self, *args, **kwargs) -> None:
+                self.chat = types.SimpleNamespace(completions=_StubCompletions())
+
+        module.AuthenticationError = AuthenticationError
+        module.OpenAI = OpenAI
+        sys.modules["openai"] = module
 
 
 def _ensure_forward_ref_compatibility() -> None:
@@ -31,4 +77,6 @@ def _ensure_forward_ref_compatibility() -> None:
     setattr(forward_ref, "_evaluate", _patched)
 
 
+_ensure_pydantic_stubs()
 _ensure_forward_ref_compatibility()
+_ensure_openai_stub()
