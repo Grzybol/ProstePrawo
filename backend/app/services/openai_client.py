@@ -25,7 +25,15 @@ class OpenAIClient:
 
     def __init__(self, client: OpenAI | None = None) -> None:
         settings = get_settings()
-        self._client = client or OpenAI()
+        if client is None:
+            api_key = settings.openai_api_key
+            if not api_key:
+                raise RuntimeError(
+                    "OpenAI API key is missing. Set OPENAI_API_KEY or PROSTE_PRAWO_OPENAI_API_KEY."
+                )
+            self._client = OpenAI(api_key=api_key)
+        else:
+            self._client = client
         self._model = settings.openai_model
 
     def summarise(self, text: str) -> str:
