@@ -67,24 +67,37 @@ class Settings(BaseSettings):
     )
 
 
-def _load_env_with_file_fallback(*env_vars: str) -> str | None:
-    """Return the first available value from environment variables or .env file."""
+def _resolve_env_path() -> Path | None:
+    """Return the most relevant ``.env`` file path if available."""
 
-    env_path = Path(".env")
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_env_with_file_fallback(*env_vars: str) -> str | None:
+    """Return the first available value preferring the ``.env`` file."""
+
+    env_path = _resolve_env_path()
+    file_values: dict[str, str] = {}
+    if env_path is not None:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, raw_value = line.split("=", 1)
+            candidate = raw_value.strip().strip('"').strip("'")
+            if candidate:
+                file_values[key.strip()] = candidate
     for env_var in env_vars:
+        if env_var in file_values:
+            return file_values[env_var]
         value = os.getenv(env_var)
-        if not value and env_path.exists():
-            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, raw_value = line.split("=", 1)
-                if key.strip() != env_var:
-                    continue
-                candidate = raw_value.strip().strip('"').strip("'")
-                if candidate:
-                    value = candidate
-                    break
         if value:
             return value
     return None
