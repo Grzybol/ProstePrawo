@@ -227,54 +227,106 @@ class OpenAIClient:
         max_tokens: int = 512,
         temperature: float = 0.2,
     ) -> tuple[str, dict[str, int]]:
-        try:
-            logger.debug(
-                "Calling OpenAI chat completion (model=%s, max_tokens=%d, temperature=%.2f)",
-                self._model,
-                max_tokens,
-                temperature,
-            )
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-        except AuthenticationError as exc:  # pragma: no cover - network failure path
-            logger.warning("OpenAI authentication failed: %s", exc)
-            raise OpenAIClientError("Nie udało się uwierzytelnić w OpenAI API.") from exc
-        except Exception as exc:  # pragma: no cover - network failure path
-            logger.exception("OpenAI chat completion failed")
-            raise OpenAIClientError("Nie udało się wywołać OpenAI API.") from exc
-        choices = getattr(response, "choices", None)
-        if not choices:
-            logger.error("OpenAI response did not include choices")
-            raise OpenAIClientError("OpenAI nie zwróciło żadnych wyników.")
-        choice = choices[0]
-        message = getattr(choice, "message", None)
-        content = getattr(message, "content", None)
-        finish_reason = getattr(choice, "finish_reason", None)
-        if finish_reason and finish_reason != "stop":
-            normalised_content = _normalise_json_content(str(content or ""))
-            logger.error(
-                "OpenAI response ended with finish_reason=%s. Raw content: %s\nNormalised content: %s",
-                finish_reason,
-                content,
-                normalised_content,
-            )
-            raise OpenAIClientError(
-                "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."
-            )
-        if not content:
-            logger.error("OpenAI response message missing content")
-            raise OpenAIClientError("Odpowiedź OpenAI nie zawiera treści.")
-        usage_data = getattr(response, "usage", None)
-        usage: dict[str, int] = {
-            "prompt_tokens": int(getattr(usage_data, "prompt_tokens", 0) or 0),
-            "completion_tokens": int(getattr(usage_data, "completion_tokens", 0) or 0),
-            "total_tokens": int(getattr(usage_data, "total_tokens", 0) or 0),
+        aggregated_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
         }
-        return str(content).strip(), usage
+        attempt_max_tokens = max_tokens
+        model_limit = self._model_token_limit()
+
+        for attempt in range(3):
+            try:
+                logger.debug(
+                    "Calling OpenAI chat completion (model=%s, max_tokens=%d, temperature=%.2f, attempt=%d)",
+                    self._model,
+                    attempt_max_tokens,
+                    temperature,
+                    attempt + 1,
+                )
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=attempt_max_tokens,
+                )
+            except AuthenticationError as exc:  # pragma: no cover - network failure path
+                logger.warning("OpenAI authentication failed: %s", exc)
+                raise OpenAIClientError("Nie udało się uwierzytelnić w OpenAI API.") from exc
+            except Exception as exc:  # pragma: no cover - network failure path
+                logger.exception("OpenAI chat completion failed")
+                raise OpenAIClientError("Nie udało się wywołać OpenAI API.") from exc
+
+            usage_data = getattr(response, "usage", None)
+            aggregated_usage["prompt_tokens"] += int(
+                getattr(usage_data, "prompt_tokens", 0) or 0
+            )
+            aggregated_usage["completion_tokens"] += int(
+                getattr(usage_data, "completion_tokens", 0) or 0
+            )
+            aggregated_usage["total_tokens"] += int(
+                getattr(usage_data, "total_tokens", 0) or 0
+            )
+
+            choices = getattr(response, "choices", None)
+            if not choices:
+                logger.error("OpenAI response did not include choices")
+                raise OpenAIClientError("OpenAI nie zwróciło żadnych wyników.")
+
+            choice = choices[0]
+            message = getattr(choice, "message", None)
+            content = getattr(message, "content", None)
+            finish_reason = getattr(choice, "finish_reason", None)
+
+            if finish_reason == "length":
+                normalised_content = _normalise_json_content(str(content or ""))
+                logger.warning(
+                    "OpenAI response truncated (finish_reason=length). Raw content: %s\nNormalised content: %s",
+                    content,
+                    normalised_content,
+                )
+                if attempt_max_tokens >= model_limit:
+                    logger.error(
+                        "Reached model token limit (%d) after truncated response.",
+                        model_limit,
+                    )
+                    raise OpenAIClientError(
+                        "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."
+                    )
+                attempt_max_tokens = min(attempt_max_tokens * 2, model_limit)
+                continue
+
+            if finish_reason and finish_reason != "stop":
+                normalised_content = _normalise_json_content(str(content or ""))
+                logger.error(
+                    "OpenAI response ended with finish_reason=%s. Raw content: %s\nNormalised content: %s",
+                    finish_reason,
+                    content,
+                    normalised_content,
+                )
+                raise OpenAIClientError(
+                    "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."
+                )
+
+            if not content:
+                logger.error("OpenAI response message missing content")
+                raise OpenAIClientError("Odpowiedź OpenAI nie zawiera treści.")
+
+            return str(content).strip(), aggregated_usage
+
+        logger.error("Exceeded maximum retry attempts after truncated OpenAI responses")
+        raise OpenAIClientError(
+            "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."
+        )
+
+    def _model_token_limit(self) -> int:
+        model_limits = {
+            "gpt-4o": 128_000,
+            "gpt-4o-mini": 16_384,
+            "gpt-4.1": 128_000,
+            "gpt-4.1-mini": 128_000,
+        }
+        return model_limits.get(self._model, 16_384)
 
     def _complete_json(
         self, messages: list[dict[str, str]], *, max_tokens: int = 512
