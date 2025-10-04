@@ -31,7 +31,11 @@ class OpenAIClient:
                 raise RuntimeError(
                     "OpenAI API key is missing. Set OPENAI_API_KEY or PROSTE_PRAWO_OPENAI_API_KEY."
                 )
-            self._client = OpenAI(api_key=api_key)
+            client_kwargs = {"api_key": api_key}
+            openai_project = settings.openai_project
+            if openai_project:
+                client_kwargs["project"] = openai_project
+            self._client = OpenAI(**client_kwargs)
         else:
             self._client = client
         self._model = settings.openai_model

@@ -70,6 +70,32 @@ def test_client_uses_api_key_from_env(monkeypatch, tmp_path):
     assert captured.get("kwargs", {}).get("api_key") == "from_env"
 
 
+def test_client_passes_project_when_available(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "from_env")
+    monkeypatch.setenv("OPENAI_PROJECT", "project-123")
+    monkeypatch.delenv("PROSTE_PRAWO_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PROSTE_PRAWO_OPENAI_PROJECT", raising=False)
+    get_settings.cache_clear()
+    captured: dict[str, object] = {}
+
+    class _DummyOpenAI:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=lambda *a, **k: None)
+            )
+
+    monkeypatch.setattr("app.services.openai_client.OpenAI", _DummyOpenAI)
+    try:
+        OpenAIClient()
+    finally:
+        get_settings.cache_clear()
+
+    assert captured.get("kwargs", {}).get("api_key") == "from_env"
+    assert captured.get("kwargs", {}).get("project") == "project-123"
+
+
 def test_client_requires_api_key(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text("", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
