@@ -161,3 +161,30 @@ def test_extract_items_handles_markdown_json_response():
 
     assert result == ["Pierwszy", "Drugi"]
     assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+
+def test_complete_json_raises_on_truncated_response(caplog):
+    response_content = "[\"Niedokonczona odpowiedz"
+
+    class _LengthCompletions:
+        def create(self, **_: object):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=response_content),
+                        finish_reason="length",
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+            )
+
+    client = OpenAIClient(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=_LengthCompletions()))
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(OpenAIClientError):
+        client._complete_json([{"role": "user", "content": "Test"}])
+
+    error_messages = [record.message for record in caplog.records if record.levelno == logging.ERROR]
+    assert any("finish_reason=length" in message for message in error_messages)
+    assert any(response_content in message for message in error_messages)

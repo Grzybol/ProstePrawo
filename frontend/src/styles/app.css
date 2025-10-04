@@ -314,6 +314,37 @@ button:not(:disabled):hover,
   font-size: 0.9rem;
 }
 
+.document-usage {
+  margin: 0.5rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.document-usage > div {
+  background-color: #eef2ff;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.document-usage dt {
+  margin: 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+}
+
+.document-usage dd {
+  margin: 0;
+  font-weight: 600;
+  color: #1f2937;
+  font-size: 0.95rem;
+}
+
 .document-actions {
   display: flex;
   align-items: center;

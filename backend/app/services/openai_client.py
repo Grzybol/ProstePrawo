@@ -250,8 +250,21 @@ class OpenAIClient:
         if not choices:
             logger.error("OpenAI response did not include choices")
             raise OpenAIClientError("OpenAI nie zwróciło żadnych wyników.")
-        message = choices[0].message
+        choice = choices[0]
+        message = getattr(choice, "message", None)
         content = getattr(message, "content", None)
+        finish_reason = getattr(choice, "finish_reason", None)
+        if finish_reason and finish_reason != "stop":
+            normalised_content = _normalise_json_content(str(content or ""))
+            logger.error(
+                "OpenAI response ended with finish_reason=%s. Raw content: %s\nNormalised content: %s",
+                finish_reason,
+                content,
+                normalised_content,
+            )
+            raise OpenAIClientError(
+                "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."
+            )
         if not content:
             logger.error("OpenAI response message missing content")
             raise OpenAIClientError("Odpowiedź OpenAI nie zawiera treści.")
@@ -272,7 +285,12 @@ class OpenAIClient:
             parsed = json.loads(normalised)
             return parsed, usage
         except json.JSONDecodeError as exc:
-            logger.error("Failed to decode OpenAI JSON response: %s", content, exc_info=True)
+            logger.error(
+                "Failed to decode OpenAI JSON response. Raw content: %s\nNormalised content: %s",
+                content,
+                normalised,
+                exc_info=True,
+            )
             raise OpenAIClientError("Nie udało się zinterpretować odpowiedzi jako JSON.") from exc
 
 
