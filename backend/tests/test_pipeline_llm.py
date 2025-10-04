@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 from unittest.mock import patch
@@ -61,38 +61,66 @@ class DummySettings:
     enable_cloud_llm: bool
     llm_provider: str = "openai"
     openai_model: str = "gpt-test"
+    openai_pricing: dict[str, dict[str, float]] = field(
+        default_factory=lambda: {
+            "gpt-test": {"prompt": 0.001, "completion": 0.002},
+            "default": {"prompt": 0.001, "completion": 0.002},
+        }
+    )
 
 
 class DummyOpenAIClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
-    def summarise(self, text: str) -> str:
+    def summarise(self, text: str) -> tuple[str, dict[str, int]]:
         self.calls.append(("summarise", text))
-        return "Streszczenie z chmury"
+        return "Streszczenie z chmury", {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
 
-    def extract_items(self, text: str, category: str) -> list[str]:
+    def extract_items(self, text: str, category: str) -> tuple[list[str], dict[str, int]]:
         self.calls.append(("extract_items", category))
-        return [f"AI {category}"]
+        return [f"AI {category}"], {
+            "prompt_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 30,
+        }
 
-    def simplify_sections(self, sections: Iterable[DocumentSection]) -> list[dict[str, str]]:
+    def simplify_sections(
+        self, sections: Iterable[DocumentSection]
+    ) -> tuple[list[dict[str, str]], dict[str, int]]:
         sections = list(sections)
         self.calls.append(("simplify_sections", [section.identifier for section in sections]))
-        return [
+        return (
+            [
+                {
+                    "identifier": section.identifier,
+                    "plain_language": f"Uproszczenie {section.identifier}",
+                    "source_excerpt": "fragment",
+                }
+                for section in sections
+            ],
             {
-                "identifier": section.identifier,
-                "plain_language": f"Uproszczenie {section.identifier}",
-                "source_excerpt": "fragment",
-            }
-            for section in sections
-        ]
+                "prompt_tokens": 50,
+                "completion_tokens": 25,
+                "total_tokens": 75,
+            },
+        )
 
-    def answer_question(self, question: str, retrieved_chunks: Iterable[RetrievedChunk]):
+    def answer_question(
+        self, question: str, retrieved_chunks: Iterable[RetrievedChunk]
+    ) -> tuple[dict[str, object], dict[str, int]]:
         self.calls.append(("answer_question", question))
-        return {
-            "answer": "Odpowiedź z chmury",
-            "sources": [chunk.identifier for chunk in retrieved_chunks],
-        }
+        return (
+            {
+                "answer": "Odpowiedź z chmury",
+                "sources": [chunk.identifier for chunk in retrieved_chunks],
+            },
+            {"prompt_tokens": 15, "completion_tokens": 10, "total_tokens": 25},
+        )
 
 
 def _setup_documents(tmp_path: Path) -> tuple[InMemoryRepository, DummyIndexer, DocumentMetadata]:
@@ -140,6 +168,10 @@ def test_run_pipeline_uses_openai_when_enabled(tmp_path):
     assert processed.deadlines == ["AI terminy lub daty graniczne"]
     assert processed.risks == ["AI ryzyka dla stron umowy"]
     assert all(section.plain_language.startswith("Uproszczenie") for section in processed.simplified_sections)
+    assert processed.token_usage.prompt_tokens == 140
+    assert processed.token_usage.completion_tokens == 70
+    assert processed.token_usage.total_tokens == 210
+    assert processed.token_usage.cost_usd == pytest.approx(0.00028)
     called_operations = [name for name, _ in client.calls]
     assert "summarise" in called_operations
     assert "simplify_sections" in called_operations
@@ -171,6 +203,10 @@ def test_run_pipeline_uses_heuristics_when_cloud_disabled(tmp_path):
     assert processed.obligations == ["Należy zapłacić karę do 7 dni."]
     assert processed.penalties == ["Należy zapłacić karę do 7 dni."]
     assert processed.deadlines == ["Należy zapłacić karę do 7 dni."]
+    assert processed.token_usage.prompt_tokens == 0
+    assert processed.token_usage.completion_tokens == 0
+    assert processed.token_usage.total_tokens == 0
+    assert processed.token_usage.cost_usd == 0
 
 
 def test_answer_question_uses_openai_when_enabled(tmp_path):

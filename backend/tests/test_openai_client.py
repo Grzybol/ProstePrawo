@@ -157,6 +157,7 @@ def test_extract_items_handles_markdown_json_response():
 
     client = OpenAIClient(client=SimpleNamespace(chat=SimpleNamespace(completions=_SuccessCompletions())))
 
-    result = client.extract_items("Tekst", "Kategorie")
+    result, usage = client.extract_items("Tekst", "Kategorie")
 
     assert result == ["Pierwszy", "Drugi"]
+    assert usage == {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

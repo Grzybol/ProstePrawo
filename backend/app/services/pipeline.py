@@ -16,6 +16,7 @@ from ..core.config import get_settings
 from ..models.documents import (
     DocumentMetadata,
     DocumentProcessingStatus,
+    DocumentUsageMetrics,
     SectionSimplification,
 )
 from ..repositories import DocumentRepository
@@ -136,34 +137,106 @@ class DocumentPipeline:
             logger.info("Indexed sanitised sections for %s", document_id)
 
             use_cloud = self._settings.enable_cloud_llm
+            usage_totals = DocumentUsageMetrics()
             try:
                 logger.info(
                     "Running inference for %s using %s models",
                     document_id,
                     "OpenAI" if use_cloud else "local",
                 )
-                metadata.summary = inference.build_summary(sanitized.text, use_cloud=use_cloud)
-                metadata.obligations = inference.extract_obligations(sanitized.text, use_cloud=use_cloud)
-                metadata.penalties = inference.extract_penalties(sanitized.text, use_cloud=use_cloud)
-                metadata.deadlines = inference.extract_deadlines(sanitized.text, use_cloud=use_cloud)
-                metadata.risks = inference.extract_risks(sanitized.text, use_cloud=use_cloud)
-                metadata.simplified_sections = inference.simplify_sections(
+                summary, summary_usage = inference.build_summary(
+                    sanitized.text, use_cloud=use_cloud
+                )
+                metadata.summary = summary
+                usage_totals.accumulate(summary_usage)
+
+                obligations, obligations_usage = inference.extract_obligations(
+                    sanitized.text, use_cloud=use_cloud
+                )
+                metadata.obligations = obligations
+                usage_totals.accumulate(obligations_usage)
+
+                penalties, penalties_usage = inference.extract_penalties(
+                    sanitized.text, use_cloud=use_cloud
+                )
+                metadata.penalties = penalties
+                usage_totals.accumulate(penalties_usage)
+
+                deadlines, deadlines_usage = inference.extract_deadlines(
+                    sanitized.text, use_cloud=use_cloud
+                )
+                metadata.deadlines = deadlines
+                usage_totals.accumulate(deadlines_usage)
+
+                risks, risks_usage = inference.extract_risks(
+                    sanitized.text, use_cloud=use_cloud
+                )
+                metadata.risks = risks
+                usage_totals.accumulate(risks_usage)
+
+                simplified, simplified_usage = inference.simplify_sections(
                     sanitized_sections, use_cloud=use_cloud
                 )
+                metadata.simplified_sections = simplified
+                usage_totals.accumulate(simplified_usage)
             except OpenAIClientError:
                 logger.warning(
                     "Falling back to local inference for %s due to OpenAI failure",
                     document_id,
                     exc_info=True,
                 )
-                metadata.summary = inference.build_summary(sanitized.text, use_cloud=False)
-                metadata.obligations = inference.extract_obligations(sanitized.text, use_cloud=False)
-                metadata.penalties = inference.extract_penalties(sanitized.text, use_cloud=False)
-                metadata.deadlines = inference.extract_deadlines(sanitized.text, use_cloud=False)
-                metadata.risks = inference.extract_risks(sanitized.text, use_cloud=False)
-                metadata.simplified_sections = inference.simplify_sections(
+                summary, summary_usage = inference.build_summary(
+                    sanitized.text, use_cloud=False
+                )
+                metadata.summary = summary
+                usage_totals.accumulate(summary_usage)
+
+                obligations, obligations_usage = inference.extract_obligations(
+                    sanitized.text, use_cloud=False
+                )
+                metadata.obligations = obligations
+                usage_totals.accumulate(obligations_usage)
+
+                penalties, penalties_usage = inference.extract_penalties(
+                    sanitized.text, use_cloud=False
+                )
+                metadata.penalties = penalties
+                usage_totals.accumulate(penalties_usage)
+
+                deadlines, deadlines_usage = inference.extract_deadlines(
+                    sanitized.text, use_cloud=False
+                )
+                metadata.deadlines = deadlines
+                usage_totals.accumulate(deadlines_usage)
+
+                risks, risks_usage = inference.extract_risks(
+                    sanitized.text, use_cloud=False
+                )
+                metadata.risks = risks
+                usage_totals.accumulate(risks_usage)
+
+                simplified, simplified_usage = inference.simplify_sections(
                     sanitized_sections, use_cloud=False
                 )
+                metadata.simplified_sections = simplified
+                usage_totals.accumulate(simplified_usage)
+            if usage_totals.total_tokens == 0 and (
+                usage_totals.prompt_tokens or usage_totals.completion_tokens
+            ):
+                usage_totals.total_tokens = (
+                    usage_totals.prompt_tokens + usage_totals.completion_tokens
+                )
+            pricing = self._settings.openai_pricing.get(
+                self._settings.openai_model
+            ) or self._settings.openai_pricing.get("default", {})
+            prompt_rate = float(pricing.get("prompt", 0.0))
+            completion_rate = float(pricing.get("completion", 0.0))
+            cost = (
+                (usage_totals.prompt_tokens / 1000) * prompt_rate
+                + (usage_totals.completion_tokens / 1000) * completion_rate
+            )
+            usage_totals.cost_usd = round(cost, 6)
+            metadata.token_usage = usage_totals
             metadata.definitions = inference.extract_definitions(sanitized.text)
             metadata.status = DocumentProcessingStatus.READY
             self.repository.upsert(metadata)
