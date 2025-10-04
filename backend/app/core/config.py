@@ -97,6 +97,7 @@ def _load_env_with_file_fallback(*env_vars: str) -> str | None:
     for env_var in env_vars:
         if env_var in file_values:
             return file_values[env_var]
+    for env_var in env_vars:
         value = os.getenv(env_var)
         if value:
             return value
@@ -108,17 +109,17 @@ def get_settings() -> Settings:
     """Return the cached application settings instance."""
 
     settings = Settings()
-    if not settings.openai_api_key:
-        value = _load_env_with_file_fallback(
-            "PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"
-        )
-        if value:
-            settings.openai_api_key = value
-    if not settings.openai_project:
-        value = _load_env_with_file_fallback(
-            "PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT"
-        )
-        if value:
-            settings.openai_project = value
+
+    value = _load_env_with_file_fallback(
+        "PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"
+    )
+    if value:
+        settings.openai_api_key = value
+
+    value = _load_env_with_file_fallback(
+        "PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT"
+    )
+    if value:
+        settings.openai_project = value
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings
