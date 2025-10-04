@@ -6,7 +6,7 @@ import logging
 from functools import lru_cache
 from typing import Any, Iterable
 
-from openai import OpenAI
+from openai import AuthenticationError, OpenAI
 
 from ..core.config import get_settings
 from .indexing import RetrievedChunk
@@ -203,6 +203,15 @@ class OpenAIClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+        except AuthenticationError as exc:  # pragma: no cover - network failure path
+            message = str(exc)
+            if ":" in message:
+                prefix, _ = message.split(":", 1)
+                message = f"{prefix}: [REDACTED]"
+            else:
+                message = "OpenAI authentication failed: [REDACTED]"
+            logger.warning(message)
+            raise OpenAIClientError("Nie udało się uwierzytelnić w OpenAI API.") from exc
         except Exception as exc:  # pragma: no cover - network failure path
             logger.exception("OpenAI chat completion failed")
             raise OpenAIClientError("Nie udało się wywołać OpenAI API.") from exc
