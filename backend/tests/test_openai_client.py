@@ -138,3 +138,25 @@ def test_client_requires_api_key(monkeypatch, tmp_path):
             OpenAIClient()
     finally:
         get_settings.cache_clear()
+
+
+def test_extract_items_handles_markdown_json_response():
+    response_content = """```json
+    [\n  \"Pierwszy\",\n  \"Drugi\"\n]
+    ```"""
+
+    class _SuccessCompletions:
+        def create(self, **_: object):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=response_content)
+                    )
+                ]
+            )
+
+    client = OpenAIClient(client=SimpleNamespace(chat=SimpleNamespace(completions=_SuccessCompletions())))
+
+    result = client.extract_items("Tekst", "Kategorie")
+
+    assert result == ["Pierwszy", "Drugi"]
