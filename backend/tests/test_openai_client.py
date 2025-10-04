@@ -70,7 +70,7 @@ def test_client_uses_api_key_from_env(monkeypatch, tmp_path):
     assert captured.get("kwargs", {}).get("api_key") == "from_env"
 
 
-def test_client_prefers_env_file_over_environment(monkeypatch, tmp_path):
+def test_client_ignores_host_environment(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("OPENAI_API_KEY=from_file\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -95,10 +95,15 @@ def test_client_prefers_env_file_over_environment(monkeypatch, tmp_path):
     assert captured.get("kwargs", {}).get("api_key") == "from_file"
 
 
-def test_client_passes_project_when_available(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "from_env")
-    monkeypatch.setenv("OPENAI_PROJECT", "project-123")
+def test_client_passes_project_when_available(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "OPENAI_API_KEY=from_file\nOPENAI_PROJECT=project-123\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("PROSTE_PRAWO_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_PROJECT", raising=False)
     monkeypatch.delenv("PROSTE_PRAWO_OPENAI_PROJECT", raising=False)
     get_settings.cache_clear()
     captured: dict[str, object] = {}
@@ -117,7 +122,7 @@ def test_client_passes_project_when_available(monkeypatch):
     finally:
         get_settings.cache_clear()
 
-    assert captured.get("kwargs", {}).get("api_key") == "from_env"
+    assert captured.get("kwargs", {}).get("api_key") == "from_file"
     assert captured.get("kwargs", {}).get("project") == "project-123"
 
 

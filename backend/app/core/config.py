@@ -1,7 +1,6 @@
 """Application-wide configuration and settings."""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -80,27 +79,25 @@ def _resolve_env_path() -> Path | None:
     return None
 
 
-def _load_env_with_file_fallback(*env_vars: str) -> str | None:
-    """Return the first available value preferring the ``.env`` file."""
+def _load_from_env_file(*env_vars: str) -> str | None:
+    """Return the first available value found in the project's ``.env`` file."""
 
     env_path = _resolve_env_path()
+    if env_path is None or not env_path.exists():
+        return None
+
     file_values: dict[str, str] = {}
-    if env_path is not None:
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, raw_value = line.split("=", 1)
-            candidate = raw_value.strip().strip('"').strip("'")
-            if candidate:
-                file_values[key.strip()] = candidate
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        candidate = raw_value.strip().strip('"').strip("'")
+        if candidate:
+            file_values[key.strip()] = candidate
     for env_var in env_vars:
         if env_var in file_values:
             return file_values[env_var]
-    for env_var in env_vars:
-        value = os.getenv(env_var)
-        if value:
-            return value
     return None
 
 
@@ -110,16 +107,10 @@ def get_settings() -> Settings:
 
     settings = Settings()
 
-    value = _load_env_with_file_fallback(
-        "PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"
-    )
-    if value:
-        settings.openai_api_key = value
+    value = _load_from_env_file("PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY")
+    settings.openai_api_key = value
 
-    value = _load_env_with_file_fallback(
-        "PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT"
-    )
-    if value:
-        settings.openai_project = value
+    value = _load_from_env_file("PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT")
+    settings.openai_project = value
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings

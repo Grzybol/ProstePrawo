@@ -29,7 +29,7 @@ class OpenAIClient:
             api_key = settings.openai_api_key
             if not api_key:
                 raise RuntimeError(
-                    "OpenAI API key is missing. Set OPENAI_API_KEY or PROSTE_PRAWO_OPENAI_API_KEY."
+                    "OpenAI API key is missing. Define OPENAI_API_KEY in the project .env file."
                 )
             client_kwargs = {"api_key": api_key}
             openai_project = settings.openai_project
