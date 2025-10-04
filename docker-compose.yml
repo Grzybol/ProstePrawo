@@ -13,3 +13,4 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./data:/app/data
+      - ./.env:/app/.env:ro
