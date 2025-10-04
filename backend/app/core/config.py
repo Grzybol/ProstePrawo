@@ -37,7 +37,10 @@ class Settings(BaseSettings):
             fields = {
                 "openai_api_key": {
                     "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
-                }
+                },
+                "openai_project": {
+                    "env": ["PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT"],
+                },
             }
 
     data_dir: Path = Field(default=Path("data"), description="Root directory for stored artefacts.")
@@ -53,6 +56,38 @@ class Settings(BaseSettings):
             else {}
         ),
     )
+    openai_project: str | None = Field(
+        default=None,
+        description="Optional OpenAI project identifier used for requests.",
+        **(
+            {"validation_alias": AliasChoices("OPENAI_PROJECT", "PROSTE_PRAWO_OPENAI_PROJECT")}
+            if AliasChoices is not None
+            else {}
+        ),
+    )
+
+
+def _load_env_with_file_fallback(*env_vars: str) -> str | None:
+    """Return the first available value from environment variables or .env file."""
+
+    env_path = Path(".env")
+    for env_var in env_vars:
+        value = os.getenv(env_var)
+        if not value and env_path.exists():
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, raw_value = line.split("=", 1)
+                if key.strip() != env_var:
+                    continue
+                candidate = raw_value.strip().strip('"').strip("'")
+                if candidate:
+                    value = candidate
+                    break
+        if value:
+            return value
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -61,25 +96,16 @@ def get_settings() -> Settings:
 
     settings = Settings()
     if not settings.openai_api_key:
-        for env_var in ("PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"):
-            value = os.getenv(env_var)
-            if not value:
-                env_path = Path(".env")
-                if env_path.exists():
-                    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-                        line = raw_line.strip()
-                        if not line or line.startswith("#") or "=" not in line:
-                            continue
-                        key, raw_value = line.split("=", 1)
-                        if key.strip() != env_var:
-                            continue
-                        candidate = raw_value.strip().strip('"').strip("'")
-                        if candidate:
-                            value = candidate
-                            break
-                if not value:
-                    continue
+        value = _load_env_with_file_fallback(
+            "PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"
+        )
+        if value:
             settings.openai_api_key = value
-            break
+    if not settings.openai_project:
+        value = _load_env_with_file_fallback(
+            "PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT"
+        )
+        if value:
+            settings.openai_project = value
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings
