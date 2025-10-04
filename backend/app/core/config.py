@@ -1,24 +1,58 @@
 """Application-wide configuration and settings."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
-from pydantic_settings import BaseSettings
+try:  # pragma: no cover - compatibility with Pydantic v1
+    from pydantic import AliasChoices, Field
+except ImportError:  # pragma: no cover - fallback for older versions
+    AliasChoices = None  # type: ignore[assignment]
+    from pydantic import Field
+try:  # pragma: no cover - compatibility with pydantic-settings v1
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # pragma: no cover - fallback when SettingsConfigDict is unavailable
+    from pydantic_settings import BaseSettings  # type: ignore[no-redef]
+
+    SettingsConfigDict = None  # type: ignore[assignment]
 
 
 class Settings(BaseSettings):
     """Define high-level configuration knobs for the monolith."""
 
+    if SettingsConfigDict is not None:
+        model_config = SettingsConfigDict(
+            env_file=".env",
+            env_file_encoding="utf-8",
+            env_prefix="PROSTE_PRAWO_",
+            case_sensitive=False,
+        )
+
     data_dir: Path = Field(default=Path("data"), description="Root directory for stored artefacts.")
     enable_cloud_llm: bool = Field(default=True, description="Allow outbound LLM requests after sanitisation.")
     llm_provider: str = Field(default="openai", description="Default LLM provider identifier.")
     openai_model: str = Field(default="gpt-4o-mini", description="Baseline model for simplification tasks.")
+    openai_api_key: str | None = Field(
+        default=None,
+        description="API key used for authenticating OpenAI requests.",
+        **(
+            {"validation_alias": AliasChoices("OPENAI_API_KEY", "PROSTE_PRAWO_OPENAI_API_KEY")}
+            if AliasChoices is not None
+            else {}
+        ),
+    )
 
-    class Config:
+    class Config:  # pragma: no cover - maintained for Pydantic v1
         env_prefix = "PROSTE_PRAWO_"
         case_sensitive = False
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        fields = {
+            "openai_api_key": {
+                "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
+            }
+        }
 
 
 @lru_cache(maxsize=1)
@@ -26,5 +60,26 @@ def get_settings() -> Settings:
     """Return the cached application settings instance."""
 
     settings = Settings()
+    if not settings.openai_api_key:
+        for env_var in ("PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"):
+            value = os.getenv(env_var)
+            if not value:
+                env_path = Path(".env")
+                if env_path.exists():
+                    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                        line = raw_line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, raw_value = line.split("=", 1)
+                        if key.strip() != env_var:
+                            continue
+                        candidate = raw_value.strip().strip('"').strip("'")
+                        if candidate:
+                            value = candidate
+                            break
+                if not value:
+                    continue
+            settings.openai_api_key = value
+            break
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings
