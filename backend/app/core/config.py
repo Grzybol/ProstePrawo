@@ -28,6 +28,17 @@ class Settings(BaseSettings):
             env_prefix="PROSTE_PRAWO_",
             case_sensitive=False,
         )
+    else:
+        class Config:  # pragma: no cover - maintained for Pydantic v1
+            env_prefix = "PROSTE_PRAWO_"
+            case_sensitive = False
+            env_file = ".env"
+            env_file_encoding = "utf-8"
+            fields = {
+                "openai_api_key": {
+                    "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
+                }
+            }
 
     data_dir: Path = Field(default=Path("data"), description="Root directory for stored artefacts.")
     enable_cloud_llm: bool = Field(default=True, description="Allow outbound LLM requests after sanitisation.")
@@ -42,17 +53,6 @@ class Settings(BaseSettings):
             else {}
         ),
     )
-
-    class Config:  # pragma: no cover - maintained for Pydantic v1
-        env_prefix = "PROSTE_PRAWO_"
-        case_sensitive = False
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        fields = {
-            "openai_api_key": {
-                "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
-            }
-        }
 
 
 @lru_cache(maxsize=1)
