@@ -75,7 +75,7 @@ def test_client_prefers_env_file_over_environment(monkeypatch, tmp_path):
     env_file.write_text("OPENAI_API_KEY=from_file\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "from_env")
-    monkeypatch.delenv("PROSTE_PRAWO_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("PROSTE_PRAWO_OPENAI_API_KEY", "from_pref_env")
     get_settings.cache_clear()
     captured: dict[str, object] = {}
 
