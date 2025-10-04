@@ -16,6 +16,23 @@ from .ingestion import DocumentSection
 logger = logging.getLogger(__name__)
 
 
+def _normalise_json_content(content: str) -> str:
+    """Return content stripped of common Markdown fences."""
+
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines:
+            # Drop opening fence such as ``` or ```json
+            first_line = lines[0].strip()
+            if first_line.startswith("```"):
+                lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
 class OpenAIClientError(RuntimeError):
     """Raised when the OpenAI client fails to generate a valid response."""
 
@@ -234,8 +251,9 @@ class OpenAIClient:
 
     def _complete_json(self, messages: list[dict[str, str]], *, max_tokens: int = 512) -> Any:
         content = self._complete(messages, max_tokens=max_tokens)
+        normalised = _normalise_json_content(content)
         try:
-            parsed = json.loads(content)
+            parsed = json.loads(normalised)
             return parsed
         except json.JSONDecodeError as exc:
             logger.error("Failed to decode OpenAI JSON response: %s", content, exc_info=True)
