@@ -1,6 +1,7 @@
 """Thin wrapper around the official OpenAI client used by the pipeline."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from functools import lru_cache
@@ -56,6 +57,45 @@ class OpenAIClient:
         else:
             self._client = client
         self._model = settings.openai_model
+
+    def _summarise_content_for_log(self, content: object) -> str:
+        """Return a privacy-preserving summary of the model output."""
+
+        text = str(content or "").strip()
+        if not text:
+            return "<empty>"
+        normalised = _normalise_json_content(text)
+        collapsed = " ".join(normalised.split())
+        if not collapsed:
+            return "<empty>"
+        digest = hashlib.sha256(collapsed.encode("utf-8")).hexdigest()[:12]
+        return f"{len(collapsed)} chars (sha256={digest})"
+
+    def _estimate_prompt_tokens(self, messages: list[dict[str, str]]) -> int:
+        """Estimate the number of tokens used by the prompt messages."""
+
+        try:  # pragma: no cover - exercised when tiktoken is available
+            import tiktoken
+
+            try:
+                encoding = tiktoken.encoding_for_model(self._model)
+            except KeyError:
+                encoding = tiktoken.get_encoding("cl100k_base")
+
+            total = 0
+            for message in messages:
+                role = message.get("role", "")
+                content = message.get("content", "")
+                total += len(encoding.encode(role))
+                total += len(encoding.encode(content))
+                total += 3  # Per-message framing tokens
+            return total + 3  # Priming tokens
+        except Exception:  # pragma: no cover - deterministic fallback
+            approximate_chars = sum(
+                len(str(message.get("content", ""))) + len(str(message.get("role", "")))
+                for message in messages
+            )
+            return max(1, approximate_chars // 4)
 
     def summarise(self, text: str) -> tuple[str, dict[str, int]]:
         logger.debug("Requesting OpenAI summary (%d chars)", len(text))
@@ -143,7 +183,27 @@ class OpenAIClient:
             },
         ]
         logger.debug("Requesting OpenAI simplification for %d sections", len(payload))
-        data, usage = self._complete_json(messages, max_tokens=1200)
+        prompt_tokens = self._estimate_prompt_tokens(messages)
+        model_limit = self._model_token_limit()
+        safety_margin = 512
+        min_completion = 256
+        raw_budget = max(model_limit - prompt_tokens, 0)
+        if raw_budget <= min_completion:
+            initial_max = max(raw_budget, 1)
+        else:
+            available = max(raw_budget - safety_margin, 0)
+            if available >= min_completion:
+                initial_max = available
+            else:
+                initial_max = raw_budget
+        initial_max = min(int(initial_max), model_limit)
+        logger.debug(
+            "Calculated simplification token budget (prompt=%d, max_tokens=%d, model_limit=%d)",
+            prompt_tokens,
+            initial_max,
+            model_limit,
+        )
+        data, usage = self._complete_json(messages, max_tokens=initial_max)
         if isinstance(data, list):
             logger.debug("Received OpenAI simplification response with %d items", len(data))
         else:
@@ -279,11 +339,11 @@ class OpenAIClient:
             finish_reason = getattr(choice, "finish_reason", None)
 
             if finish_reason == "length":
-                normalised_content = _normalise_json_content(str(content or ""))
                 logger.warning(
-                    "OpenAI response truncated (finish_reason=length). Raw content: %s\nNormalised content: %s",
-                    content,
-                    normalised_content,
+                    "OpenAI response truncated (finish_reason=length, attempt=%d, max_tokens=%d, content_summary=%s)",
+                    attempt + 1,
+                    attempt_max_tokens,
+                    self._summarise_content_for_log(content),
                 )
                 if attempt_max_tokens >= model_limit:
                     logger.error(
@@ -297,12 +357,12 @@ class OpenAIClient:
                 continue
 
             if finish_reason and finish_reason != "stop":
-                normalised_content = _normalise_json_content(str(content or ""))
                 logger.error(
-                    "OpenAI response ended with finish_reason=%s. Raw content: %s\nNormalised content: %s",
+                    "OpenAI response ended with finish_reason=%s (attempt=%d, max_tokens=%d, content_summary=%s)",
                     finish_reason,
-                    content,
-                    normalised_content,
+                    attempt + 1,
+                    attempt_max_tokens,
+                    self._summarise_content_for_log(content),
                 )
                 raise OpenAIClientError(
                     "OpenAI zakończyło generowanie odpowiedzi przedwcześnie."

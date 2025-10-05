@@ -1,6 +1,7 @@
 """Tests for the OpenAI client helper."""
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import get_settings
+from app.services.ingestion import DocumentSection
 from app.services.openai_client import OpenAIClient, OpenAIClientError
 
 
@@ -214,6 +216,8 @@ def test_complete_json_retries_on_truncated_response(caplog):
         record.message for record in caplog.records if record.levelno == logging.WARNING
     ]
     assert any("finish_reason=length" in message for message in warning_messages)
+    assert all("Niedokonczona" not in message for message in warning_messages)
+    assert any("content_summary" in message for message in warning_messages)
 
 
 def test_complete_json_raises_when_truncated_and_limit_reached(caplog):
@@ -244,4 +248,52 @@ def test_complete_json_raises_when_truncated_and_limit_reached(caplog):
     warning_messages = [record.message for record in caplog.records if record.levelno == logging.WARNING]
     error_messages = [record.message for record in caplog.records if record.levelno == logging.ERROR]
     assert any("finish_reason=length" in message for message in warning_messages)
+    assert all("Niedokonczona" not in message for message in warning_messages)
     assert any("model token limit" in message for message in error_messages)
+
+
+def test_simplify_sections_uses_dynamic_token_budget(monkeypatch, caplog):
+    calls: list[int] = []
+
+    class _RecordingCompletions:
+        def create(self, **kwargs: object):
+            calls.append(int(kwargs.get("max_tokens", 0)))
+            response_payload = json.dumps(
+                [
+                    {
+                        "identifier": "section-1",
+                        "plain_language": "Proste streszczenie",
+                        "source_excerpt": "Fragment",
+                    }
+                ],
+                ensure_ascii=False,
+            )
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=response_payload),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=50, completion_tokens=60, total_tokens=110),
+            )
+
+    client = OpenAIClient(client=SimpleNamespace(chat=SimpleNamespace(completions=_RecordingCompletions())))
+    client._model_token_limit = MethodType(lambda self: 4096, client)
+    client._estimate_prompt_tokens = MethodType(lambda self, _: 3000, client)
+
+    with caplog.at_level(logging.WARNING):
+        result, usage = client.simplify_sections(
+            [DocumentSection(identifier="section-1", text="x" * 1000)]
+        )
+
+    assert result == [
+        {
+            "identifier": "section-1",
+            "plain_language": "Proste streszczenie",
+            "source_excerpt": "Fragment",
+        }
+    ]
+    assert usage == {"prompt_tokens": 50, "completion_tokens": 60, "total_tokens": 110}
+    assert calls == [584]
+    assert not any(record.levelno == logging.WARNING for record in caplog.records)
