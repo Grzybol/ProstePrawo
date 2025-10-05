@@ -56,24 +56,30 @@ class DocumentRepository:
         if row is None:
             raise KeyError(f"{user_id}:{doc_id}")
         data = json.loads(row["payload"])
-        return _deserialize_document(data)
+        return _deserialize_document(data, user_id=user_id, doc_id=doc_id)
 
     def list_for_user(self, user_id: int) -> Iterable[DocumentMetadata]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT payload FROM documents WHERE user_id = ? ORDER BY json_extract(payload, '$.created_at')",
+                "SELECT doc_id, payload FROM documents WHERE user_id = ? ORDER BY json_extract(payload, '$.created_at')",
                 (str(user_id),),
             ).fetchall()
         for row in rows:
-            yield _deserialize_document(json.loads(row["payload"]))
+            yield _deserialize_document(
+                json.loads(row["payload"]), user_id=user_id, doc_id=row["doc_id"]
+            )
 
     def list_all(self) -> Iterable[DocumentMetadata]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT payload FROM documents ORDER BY json_extract(payload, '$.created_at')"
+                "SELECT user_id, doc_id, payload FROM documents ORDER BY json_extract(payload, '$.created_at')"
             ).fetchall()
         for row in rows:
-            yield _deserialize_document(json.loads(row["payload"]))
+            yield _deserialize_document(
+                json.loads(row["payload"]),
+                user_id=row["user_id"],
+                doc_id=row["doc_id"],
+            )
 
 
 def _serialize_document(document: DocumentMetadata) -> dict:
@@ -89,10 +95,20 @@ def _serialize_document(document: DocumentMetadata) -> dict:
     return data
 
 
-def _deserialize_document(data: dict) -> DocumentMetadata:
+def _deserialize_document(
+    data: dict, *, user_id: int | str | None = None, doc_id: UUID | str | None = None
+) -> DocumentMetadata:
     parsed = data.copy()
+    if "user_id" not in parsed:
+        if user_id is None:
+            raise KeyError("user_id")
+        parsed["user_id"] = user_id
+    if "doc_id" not in parsed:
+        if doc_id is None:
+            raise KeyError("doc_id")
+        parsed["doc_id"] = doc_id
     parsed["user_id"] = int(parsed["user_id"])
-    parsed["doc_id"] = UUID(parsed["doc_id"])
+    parsed["doc_id"] = UUID(str(parsed["doc_id"]))
     parsed["created_at"] = datetime.fromisoformat(parsed["created_at"])
     parsed["status"] = DocumentProcessingStatus(parsed["status"])
     for path_key in ("source_path", "sanitized_path", "pii_secret_path"):
