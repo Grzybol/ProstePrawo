@@ -1,9 +1,11 @@
 """Application-wide configuration and settings."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
+from typing import get_args, get_origin
 
 try:  # pragma: no cover - compatibility with Pydantic v1
     from pydantic import AliasChoices, BaseModel, Field
@@ -28,6 +30,7 @@ class Settings(BaseSettings):
             env_prefix="PROSTE_PRAWO_",
             env_nested_delimiter="__",
             case_sensitive=False,
+            extra="allow",
         )
     else:
         class Config:  # pragma: no cover - maintained for Pydantic v1
@@ -36,6 +39,7 @@ class Settings(BaseSettings):
             env_file = ".env"
             env_file_encoding = "utf-8"
             env_nested_delimiter = "__"
+            extra = "allow"
             fields = {
                 "openai_api_key": {
                     "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
@@ -151,6 +155,81 @@ def _load_from_env_file(*env_vars: str) -> str | None:
     return None
 
 
+def _get_env_value(*env_vars: str) -> str | None:
+    """Return the first non-empty value from the environment or ``.env`` file."""
+
+    for env_var in env_vars:
+        value = os.getenv(env_var)
+        if value is not None and value != "":
+            return value
+
+    return _load_from_env_file(*env_vars)
+
+
+def _coerce_value(value: str, annotation: Any) -> Any:
+    """Attempt to cast ``value`` to the type described by ``annotation``."""
+
+    if value == "":
+        return None
+
+    origin = get_origin(annotation)
+    if origin is None:
+        target = annotation
+    elif origin is list:
+        target = origin
+    elif origin is dict:
+        target = origin
+    elif origin is tuple:
+        target = origin
+    else:
+        non_optional = [arg for arg in get_args(annotation) if arg is not type(None)]  # noqa: E721
+        target = non_optional[0] if non_optional else annotation
+
+    if target in {bool, type(bool)}:
+        return value.lower() in {"1", "true", "yes", "on"}
+    if target in {int, type(int)}:
+        return int(value)
+    return value
+
+
+def _apply_nested_environment(settings: Settings) -> None:
+    """Update nested models with environment-based overrides.
+
+    ``pydantic-settings`` 2.x does not automatically populate nested models
+    when using the ``env_nested_delimiter`` configuration.  Until this is
+    resolved upstream we manually read the relevant environment variables and
+    coerce them into the expected types.
+    """
+
+    nested_configs = (
+        (settings.smtp, "SMTP"),
+        (settings.verification, "VERIFICATION"),
+        (settings.password_reset, "PASSWORD_RESET"),
+    )
+
+    for model, prefix in nested_configs:
+        if model is None or not hasattr(model, "model_fields"):
+            continue
+        for field_name, field_info in model.model_fields.items():
+            env_candidates = [
+                f"PROSTE_PRAWO_{prefix}__{field_name}".upper(),
+                f"PROSTE_PRAWO_{prefix}_{field_name}".upper(),
+                f"{prefix}__{field_name}".upper(),
+                f"{prefix}_{field_name}".upper(),
+            ]
+
+            value = _get_env_value(*env_candidates)
+            if value is None:
+                continue
+
+            coerced = _coerce_value(value, field_info.annotation)
+            setattr(model, field_name, coerced)
+
+            for attr_name in {candidate.lower() for candidate in env_candidates}:
+                if hasattr(settings, attr_name):
+                    delattr(settings, attr_name)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the cached application settings instance."""
@@ -162,5 +241,6 @@ def get_settings() -> Settings:
 
     value = _load_from_env_file("PROSTE_PRAWO_OPENAI_PROJECT", "OPENAI_PROJECT")
     settings.openai_project = value
+    _apply_nested_environment(settings)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings
