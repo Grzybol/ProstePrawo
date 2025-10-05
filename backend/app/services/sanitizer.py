@@ -14,6 +14,13 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "email": re.compile(r"[\w.%-]+@[\w.-]+\.[A-Za-z]{2,}"),
     "phone": re.compile(r"\b\+?\d{2,3}(?:[ -]?\d{2,3}){3,4}\b"),
     "amount": re.compile(r"\b\d+[\s\u00a0]?(?:zł|PLN)\b", re.IGNORECASE),
+    "name": re.compile(
+        r"\b"
+        r"[A-ZĄĆĘŁŃÓŚŻŹ][a-ząćęłńóśżź]+(?:[-'][A-ZĄĆĘŁŃÓŚŻŹ][a-ząćęłńóśżź]+)?"
+        r"\s+"
+        r"[A-ZĄĆĘŁŃÓŚŻŹ][a-ząćęłńóśżź]+(?:[-'][A-ZĄĆĘŁŃÓŚŻŹ][a-ząćęłńóśżź]+)?"
+        r"\b",
+    ),
 }
 
 

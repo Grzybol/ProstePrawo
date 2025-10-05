@@ -93,7 +93,8 @@ def test_pipeline_persists_only_placeholders(tmp_path, monkeypatch):
         payload = (
             "Art. 1. Termin dostarczenia wynosi 7 dni.\n"
             "Kontakt: biuro@example.com.\n"
-            "PESEL: 12345678901."
+            "PESEL: 12345678901.\n"
+            "Osoba kontaktowa: Jan Kowalski."
         )
         source_path = document_dir / "regulamin.txt"
         source_path.write_text(payload, encoding="utf-8")
@@ -106,13 +107,23 @@ def test_pipeline_persists_only_placeholders(tmp_path, monkeypatch):
 
         assert processed.pii_placeholders["email"] == ["<EMAIL_1>"]
         assert processed.pii_placeholders["pesel"] == ["<PESEL_1>"]
+        assert processed.pii_placeholders["name"] == ["<NAME_1>"]
+        assert processed.summary is not None
         assert "biuro@example.com" not in processed.summary
+        assert "Jan Kowalski" not in processed.summary
 
         sanitized_text = processed.sanitized_path.read_text(encoding="utf-8")
         assert "biuro@example.com" not in sanitized_text
         assert "12345678901" not in sanitized_text
+        assert "Jan Kowalski" not in sanitized_text
         assert "<EMAIL_1>" in sanitized_text
         assert "<PESEL_1>" in sanitized_text
+        assert "<NAME_1>" in sanitized_text
+
+        for section in processed.simplified_sections:
+            assert "Jan Kowalski" not in section.source_text
+            assert "Jan Kowalski" not in section.source_excerpt
+            assert "Jan Kowalski" not in section.plain_language
 
         metadata_db = tmp_path / "metadata.db"
         with sqlite3.connect(metadata_db) as conn:
@@ -129,9 +140,11 @@ def test_pipeline_persists_only_placeholders(tmp_path, monkeypatch):
         secrets_content = secrets_path.read_text(encoding="utf-8")
         assert "biuro@example.com" in secrets_content
         assert "12345678901" in secrets_content
+        assert "Jan Kowalski" in secrets_content
         placeholders = json.loads(secrets_content)
         assert placeholders["email"]["<EMAIL_1>"] == "biuro@example.com"
         assert placeholders["pesel"]["<PESEL_1>"] == "12345678901"
+        assert placeholders["name"]["<NAME_1>"] == "Jan Kowalski"
     finally:
         config.get_settings.cache_clear()
 
