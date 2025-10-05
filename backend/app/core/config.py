@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Dict
 
 try:  # pragma: no cover - compatibility with Pydantic v1
-    from pydantic import AliasChoices, Field
+    from pydantic import AliasChoices, BaseModel, Field
 except ImportError:  # pragma: no cover - fallback for older versions
     AliasChoices = None  # type: ignore[assignment]
-    from pydantic import Field
+    from pydantic import BaseModel, Field
 try:  # pragma: no cover - compatibility with pydantic-settings v1
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - fallback when SettingsConfigDict is unavailable
@@ -26,6 +26,7 @@ class Settings(BaseSettings):
             env_file=".env",
             env_file_encoding="utf-8",
             env_prefix="PROSTE_PRAWO_",
+            env_nested_delimiter="__",
             case_sensitive=False,
         )
     else:
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
             case_sensitive = False
             env_file = ".env"
             env_file_encoding = "utf-8"
+            env_nested_delimiter = "__"
             fields = {
                 "openai_api_key": {
                     "env": ["PROSTE_PRAWO_OPENAI_API_KEY", "OPENAI_API_KEY"],
@@ -43,6 +45,8 @@ class Settings(BaseSettings):
                 },
             }
 
+    app_name: str = Field(default="ProstePrawo", description="Application name used for defaults.")
+    environment: str = Field(default="development", description="Current deployment environment name.")
     data_dir: Path = Field(default=Path("data"), description="Root directory for stored artefacts.")
     enable_cloud_llm: bool = Field(default=True, description="Allow outbound LLM requests after sanitisation.")
     llm_provider: str = Field(default="openai", description="Default LLM provider identifier.")
@@ -72,6 +76,44 @@ class Settings(BaseSettings):
         },
         description="Per-model pricing (USD) per 1K prompt/completion tokens.",
     )
+    session_secret_key: str | None = Field(default=None, description="Secret used to sign session cookies.")
+    smtp: "SMTPSettings" = Field(default_factory=lambda: SMTPSettings())
+    verification: "VerificationSettings" = Field(default_factory=lambda: VerificationSettings())
+    password_reset: "PasswordResetSettings" = Field(default_factory=lambda: PasswordResetSettings())
+    turnstile_site_key: str | None = Field(default=None, description="Cloudflare Turnstile site key.")
+    turnstile_secret_key: str | None = Field(default=None, description="Cloudflare Turnstile secret key.")
+    disable_cloudflare_turnstile: bool = Field(
+        default=True,
+        description="Disable Turnstile verification (useful for development environments).",
+    )
+
+
+class SMTPSettings(BaseModel):
+    """Configuration options for the transactional mailer."""
+
+    host: str | None = None
+    port: int | None = None
+    username: str | None = None
+    password: str | None = None
+    sender: str | None = None
+    use_tls: bool = True
+
+    def is_configured(self) -> bool:
+        return bool(self.host and self.sender)
+
+
+class VerificationSettings(BaseModel):
+    """Configuration related to verification tokens."""
+
+    base_url: str | None = None
+    token_ttl_hours: int = 24
+
+
+class PasswordResetSettings(BaseModel):
+    """Configuration related to password reset tokens."""
+
+    base_url: str | None = None
+    token_ttl_hours: int = 24
 
 
 def _resolve_env_path() -> Path | None:
