@@ -13,10 +13,23 @@ def _ensure_pydantic_stubs() -> None:
     if "pydantic" not in sys.modules:  # pragma: no cover - executed in CI without dependency
         module = types.ModuleType("pydantic")
 
+        class BaseModel:  # pragma: no cover - simple stub
+            def __init__(self, **kwargs) -> None:
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+            def dict(self, **kwargs):  # type: ignore[override]
+                return self.__dict__.copy()
+
         def Field(default=None, **kwargs):  # pragma: no cover - simple stub
             return default
 
+        class EmailStr(str):  # pragma: no cover - simple stub
+            pass
+
+        module.BaseModel = BaseModel
         module.Field = Field
+        module.EmailStr = EmailStr
         sys.modules["pydantic"] = module
 
     if "pydantic_settings" not in sys.modules:  # pragma: no cover - executed in CI without dependency
