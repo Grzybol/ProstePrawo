@@ -31,8 +31,10 @@ class DocumentRepository:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS documents (
-                    document_id TEXT PRIMARY KEY,
-                    payload TEXT NOT NULL
+                    user_id TEXT NOT NULL,
+                    doc_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (user_id, doc_id)
                 )
                 """
             )
@@ -41,30 +43,43 @@ class DocumentRepository:
         payload = json.dumps(_serialize_document(document))
         with self._connect() as conn:
             conn.execute(
-                "REPLACE INTO documents (document_id, payload) VALUES (?, ?)",
-                (str(document.document_id), payload),
+                "REPLACE INTO documents (user_id, doc_id, payload) VALUES (?, ?, ?)",
+                (str(document.user_id), str(document.doc_id), payload),
             )
 
-    def get(self, document_id: UUID) -> DocumentMetadata:
+    def get(self, user_id: int, doc_id: UUID) -> DocumentMetadata:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT payload FROM documents WHERE document_id = ?", (str(document_id),)
+                "SELECT payload FROM documents WHERE user_id = ? AND doc_id = ?",
+                (str(user_id), str(doc_id)),
             ).fetchone()
         if row is None:
-            raise KeyError(str(document_id))
+            raise KeyError(f"{user_id}:{doc_id}")
         data = json.loads(row["payload"])
         return _deserialize_document(data)
 
-    def list(self) -> Iterable[DocumentMetadata]:
+    def list_for_user(self, user_id: int) -> Iterable[DocumentMetadata]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT payload FROM documents ORDER BY json_extract(payload, '$.created_at')").fetchall()
+            rows = conn.execute(
+                "SELECT payload FROM documents WHERE user_id = ? ORDER BY json_extract(payload, '$.created_at')",
+                (str(user_id),),
+            ).fetchall()
+        for row in rows:
+            yield _deserialize_document(json.loads(row["payload"]))
+
+    def list_all(self) -> Iterable[DocumentMetadata]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM documents ORDER BY json_extract(payload, '$.created_at')"
+            ).fetchall()
         for row in rows:
             yield _deserialize_document(json.loads(row["payload"]))
 
 
 def _serialize_document(document: DocumentMetadata) -> dict:
     data = document.dict()
-    data["document_id"] = str(document.document_id)
+    data["user_id"] = int(document.user_id)
+    data["doc_id"] = str(document.doc_id)
     data["created_at"] = document.created_at.isoformat()
     data["status"] = document.status.value
     for path_key in ("source_path", "sanitized_path", "pii_secret_path"):
@@ -76,7 +91,8 @@ def _serialize_document(document: DocumentMetadata) -> dict:
 
 def _deserialize_document(data: dict) -> DocumentMetadata:
     parsed = data.copy()
-    parsed["document_id"] = UUID(parsed["document_id"])
+    parsed["user_id"] = int(parsed["user_id"])
+    parsed["doc_id"] = UUID(parsed["doc_id"])
     parsed["created_at"] = datetime.fromisoformat(parsed["created_at"])
     parsed["status"] = DocumentProcessingStatus(parsed["status"])
     for path_key in ("source_path", "sanitized_path", "pii_secret_path"):

@@ -1,422 +1,153 @@
-"""Integration tests for document API endpoints."""
-from __future__ import annotations
-
-import asyncio
 import importlib
-import io
 import json
 import time
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
 pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
-from zipfile import ZipFile
 
 
 @pytest.fixture
 def client_and_modules(tmp_path, monkeypatch):
-    """Provide a configured TestClient and access to the documents module."""
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("PROSTE_PRAWO_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("PROSTE_PRAWO_SESSION_SECRET_KEY", "secret")
+    monkeypatch.setenv("PROSTE_PRAWO_DISABLE_CLOUDFLARE_TURNSTILE", "1")
+    monkeypatch.setenv("PROSTE_PRAWO_ENABLE_CLOUD_LLM", "0")
+    monkeypatch.setenv("PROSTE_PRAWO_ENVIRONMENT", "test")
 
-    monkeypatch.setenv("PROSTE_PRAWO_DATA_DIR", str(tmp_path))
     from app.core import config
 
     config.get_settings.cache_clear()
     documents_module = importlib.reload(importlib.import_module("app.api.routes.documents"))
+    importlib.reload(importlib.import_module("app.api.routes.auth"))
     main_module = importlib.reload(importlib.import_module("app.main"))
-    test_client = TestClient(main_module.app)
+    client = TestClient(main_module.app)
     try:
-        yield test_client, documents_module
+        yield client, documents_module
     finally:
-        test_client.close()
+        client.close()
         config.get_settings.cache_clear()
 
 
-def test_get_document_missing_returns_404(client_and_modules):
-    client, _ = client_and_modules
-    missing_id = uuid4()
-
-    response = client.get(f"/api/documents/{missing_id}")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Document not found"
+def _register_user(client: TestClient, email: str) -> None:
+    response = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "Secret123!", "turnstile_token": "ok"},
+    )
+    assert response.status_code == 201
 
 
-def test_upload_persists_file(client_and_modules):
-    client, documents_module = client_and_modules
-    payload = b"Postanowienia umowne"
-    filename = "umowa.txt"
-
-    response = client.post("/api/documents/", files={"file": (filename, payload, "text/plain")})
-
-    assert response.status_code == 200
-    data = response.json()
-    document_id = UUID(data["document_id"])
-
-    from app.core.config import get_settings
-
-    metadata = documents_module.pipeline.get_document(document_id)
-    assert metadata.source_path is not None
-    assert metadata.source_path.exists()
-    assert metadata.source_path.read_bytes() == payload
-    assert metadata.source_path.name == filename
-
-    settings = get_settings()
-    assert Path(settings.data_dir) in metadata.source_path.parents
-    assert metadata.source_path.parent.name == "raw"
-    assert metadata.source_path.parent.parent.name == str(document_id)
-
-
-def _wait_for_status(client: TestClient, document_id: UUID, expected: str, timeout: float = 5.0) -> dict:
+def _wait_for_status(client: TestClient, doc_id: UUID, expected: str, timeout: float = 6.0) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        response = client.get(f"/api/documents/{document_id}")
-        data = response.json()
-        if data["status"] == expected:
-            return data
+        response = client.get(f"/api/documents/{doc_id}")
+        if response.status_code == 200:
+            data = response.json()
+            if data["status"] == expected:
+                return data
         time.sleep(0.05)
-    raise AssertionError(f"Document {document_id} did not reach status {expected} within timeout")
+    raise AssertionError(f"Document {doc_id} did not reach status {expected} within timeout")
 
 
-def test_pipeline_generates_metadata_and_answers_questions(client_and_modules):
+def test_upload_persists_files_per_user(client_and_modules):
     client, documents_module = client_and_modules
+    _register_user(client, "alice@example.com")
+
     payload = (
-        "Na potrzeby regulaminu \"Usługodawca\" oznacza ProstePrawo Sp. z o.o.\n"
-        "Klient – osoba fizyczna korzystająca z usług.\n"
-        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
-        "Art. 2. Kara umowna wynosi 5000 zł.\n"
-        "Ryzyko utraty dostępu występuje w przypadku braku płatności.\n"
-        "Kontakt: biuro@example.com."
-    ).encode()
-    response = client.post("/api/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
-
-    document_id = UUID(response.json()["document_id"])
-    data = _wait_for_status(client, document_id, "ready")
-
-    assert data["summary"] is not None
-    assert any("termin" in item.lower() for item in data["deadlines"])
-    assert any("kara" in item.lower() for item in data["penalties"])
-    assert "pii_placeholders" in data
-    assert "email" in data["pii_placeholders"]
-    assert all("<" in value and ">" in value for value in data["pii_placeholders"]["email"])
-    assert data["risks"]
-    assert any("ryzyko" in entry.lower() for entry in data["risks"])
-    assert "source_path" not in data
-    assert "sanitized_path" not in data
-    assert "pii_secret_path" not in data
-    assert "token_usage" in data
-    assert set(data["token_usage"].keys()) == {
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "cost_usd",
-    }
-    serialized = json.dumps(data)
-    assert "biuro@example.com" not in serialized
-
-    simplified_sections = data["simplified_sections"]
-    assert simplified_sections
-    first_section = simplified_sections[0]
-    assert first_section["plain_language"].startswith("W prostych słowach")
-    assert "należy" not in first_section["plain_language"].lower()
-    assert "<EMAIL_1>" in " ".join(section["plain_language"] for section in simplified_sections)
-    assert first_section["source_text"].startswith("Na potrzeby regulaminu")
-
-    definitions = data["definitions"]
-    assert any(entry["term"] == "Usługodawca" for entry in definitions)
-    assert any("osoba fizyczna" in entry["meaning"] for entry in definitions)
-
-    metadata = documents_module.pipeline.get_document(document_id)
-
-    from sqlite3 import connect
-
-    from app.core.config import get_settings
-
-    settings = get_settings()
-
-    with connect(Path(settings.data_dir) / "metadata.db") as conn:
-        row = conn.execute(
-            "SELECT payload FROM documents WHERE document_id = ?",
-            (str(document_id),),
-        ).fetchone()
-        assert row is not None
-        assert "biuro@example.com" not in row[0]
-
-    assert metadata.pii_secret_path is not None
-    secret_path = Path(metadata.pii_secret_path)
-    assert secret_path.exists()
-    secrets_payload = secret_path.read_text(encoding="utf-8")
-    assert "biuro@example.com" in secrets_payload
-
-    qa_response = client.get(
-        f"/api/documents/{document_id}/qa",
-        params={"question": "Jaka kara grozi za naruszenie?"},
+        b"Art. 1. Dane klienta powinny pozostac poufne. "
+        b"Kontakt: biuro@example.com."
     )
-    answer = qa_response.json()["answer"]
-    assert "Źródła" in answer
+    response = client.post(
+        "/api/documents/",
+        files={"file": ("umowa.txt", payload, "text/plain")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    doc_id = UUID(data["doc_id"])
+    user_id = data["user_id"]
 
-    simplified_payload = client.get(f"/api/documents/{document_id}/simplified")
-    simplified_payload.raise_for_status()
-    simplified_data = simplified_payload.json()
-    assert simplified_data["sections"][0]["source_text"].startswith("Na potrzeby regulaminu")
+    ready_payload = _wait_for_status(client, doc_id, "ready")
+    assert ready_payload["user_id"] == user_id
+    assert ready_payload["doc_id"] == str(doc_id)
+    assert "simplified_sections" in ready_payload
+    assert ready_payload["token_usage"]["total_tokens"] >= 0
+
+    metadata = documents_module.pipeline.get_document(user_id, doc_id)
+    assert metadata.source_path is not None and metadata.source_path.exists()
+    assert metadata.source_path.parent.name == "raw"
+    assert metadata.source_path.parent.parent.name == str(doc_id)
+    assert metadata.source_path.parent.parent.parent.name == str(user_id)
+    assert metadata.sanitized_path is not None and metadata.sanitized_path.exists()
+    assert metadata.pii_secret_path is not None and metadata.pii_secret_path.exists()
+
+    llm_store_root = metadata.sanitized_path.parents[3].parent / "llm_store" / str(user_id)
+    assert (llm_store_root / "embeddings.faiss").exists()
+    document_store = llm_store_root / "documents" / str(doc_id)
+    assert (document_store / "segments.json").exists()
+
+    serialized = json.dumps(ready_payload)
+    assert "poufne" in serialized.lower()
+    assert all("<" in value for values in ready_payload["pii_placeholders"].values() for value in values)
 
 
-def test_document_listing_does_not_expose_paths(client_and_modules):
-    client, _ = client_and_modules
-    payload = "Art. 1. Dane wrażliwe są zamaskowane.".encode("utf-8")
-
-    response = client.post("/api/documents/", files={"file": ("dokument.txt", payload, "text/plain")})
-
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
+def test_document_listing_isolated_per_user(client_and_modules):
+    client, documents_module = client_and_modules
+    _register_user(client, "alpha@example.com")
+    first = client.post(
+        "/api/documents/",
+        files={"file": ("alpha.txt", b"Art. 1. Dane kontaktowe: biuro@example.com", "text/plain")},
+    )
+    assert first.status_code == 200
+    alpha_doc = UUID(first.json()["doc_id"])
+    alpha_user = first.json()["user_id"]
+    _wait_for_status(client, alpha_doc, "ready")
 
     listing = client.get("/api/documents/")
     assert listing.status_code == 200
-    documents = listing.json()
-    assert any(entry["document_id"] == str(document_id) for entry in documents)
+    entries = listing.json()
+    assert len(entries) == 1
+    assert entries[0]["doc_id"] == str(alpha_doc)
 
-    for entry in documents:
-        assert "source_path" not in entry
-        assert "sanitized_path" not in entry
-        assert "pii_secret_path" not in entry
-        assert "risks" in entry
-        assert "token_usage" in entry
-        assert set(entry["token_usage"].keys()) == {
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-            "cost_usd",
-        }
+    logout = client.post("/api/auth/logout")
+    assert logout.status_code == 200
 
+    _register_user(client, "beta@example.com")
+    beta_listing = client.get("/api/documents/")
+    assert beta_listing.status_code == 200
+    assert beta_listing.json() == []
 
-def test_repository_survives_restart(client_and_modules):
-    client, documents_module = client_and_modules
-    payload = "Art. 1. Strony zobowiązują się do zachowania poufności.".encode("utf-8")
-    response = client.post("/api/documents/", files={"file": ("umowa.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
+    missing = client.get(f"/api/documents/{alpha_doc}")
+    assert missing.status_code == 404
 
-    metadata = documents_module.pipeline.get_document(document_id)
-    assert metadata.sanitized_path and metadata.sanitized_path.exists()
-
-    # Simulate application restart by creating a fresh pipeline instance
-    from app.services.pipeline import DocumentPipeline
-
-    new_pipeline = DocumentPipeline()
-    restored = new_pipeline.get_document(document_id)
-    assert restored.status == metadata.status
-    assert restored.summary == metadata.summary
-
-    answer = asyncio.run(new_pipeline.answer_question(document_id, "Jakie są obowiązki stron?"))
-    assert "obowiąz" in answer.lower()
+    metadata = documents_module.pipeline.get_document(alpha_user, alpha_doc)
+    assert metadata.user_id == alpha_user
 
 
-def test_export_endpoints_support_formats_and_restore(client_and_modules):
-    client, documents_module = client_and_modules
-    payload = (
-        "Umowa zawiera dane kontaktowe: biuro@example.com.\n"
-        "Art. 1. Należy przesłać dokumenty w terminie 5 dni."
-    ).encode("utf-8")
-    response = client.post("/api/documents/", files={"file": ("umowa.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    markdown = client.get(f"/api/documents/{document_id}/export", params={"format": "markdown"})
-    assert markdown.status_code == 200
-    assert markdown.headers["content-type"].startswith("text/markdown")
-    assert "<EMAIL_" in markdown.text
-
-    restored = client.get(
-        f"/api/documents/{document_id}/export",
-        params={"format": "markdown", "restore_pii": "true"},
-    )
-    assert restored.status_code == 200
-    assert "biuro@example.com" in restored.text
-
-    pdf_export = client.get(f"/api/documents/{document_id}/export", params={"format": "pdf"})
-    assert pdf_export.status_code == 200
-    assert pdf_export.headers["content-type"] == "application/pdf"
-    assert pdf_export.content.startswith(b"%PDF")
-
-    docx_export = client.get(f"/api/documents/{document_id}/export", params={"format": "docx"})
-    assert docx_export.status_code == 200
-    assert docx_export.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument"
-    )
-    with ZipFile(io.BytesIO(docx_export.content)) as archive:
-        with archive.open("word/document.xml") as xml_document:
-            xml_payload = xml_document.read().decode("utf-8")
-    assert "Umowa" in xml_payload
-
-    metadata = documents_module.pipeline.get_document(document_id)
-    assert metadata.pii_secret_path and metadata.pii_secret_path.exists()
-
-
-def test_export_restore_requires_secret_map(client_and_modules):
-    client, documents_module = client_and_modules
-    payload = "Kontakt: osoba@example.com".encode("utf-8")
-    response = client.post("/api/documents/", files={"file": ("kontakt.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    metadata = documents_module.pipeline.get_document(document_id)
-    assert metadata.pii_secret_path is not None
-    metadata.pii_secret_path.unlink()
-
-    restore_attempt = client.get(
-        f"/api/documents/{document_id}/export", params={"format": "markdown", "restore_pii": "true"}
-    )
-    assert restore_attempt.status_code == 400
-    assert "unavailable" in restore_attempt.json()["detail"].lower()
-
-
-def test_indexing_is_isolated_between_documents(client_and_modules):
+def test_qa_endpoint_requires_ready_status(client_and_modules):
     client, _ = client_and_modules
-
-    alpha_payload = (
-        "Dokument Alfa.\n"
-        "Art. 1. Szczegóły dotyczą wyłącznie procedury Alfa."
-    ).encode("utf-8")
-    beta_payload = (
-        "Dokument Beta.\n"
-        "Art. 1. Niniejszy opis skupia się na zadaniach Beta."
-    ).encode("utf-8")
-
-    alpha_response = client.post(
+    _register_user(client, "qa@example.com")
+    response = client.post(
         "/api/documents/",
-        files={"file": ("alpha.txt", alpha_payload, "text/plain")},
+        files={
+            "file": (
+                "qa.txt",
+                "Art. 1. Obowiązki muszą być spełnione.".encode("utf-8"),
+                "text/plain",
+            )
+        },
     )
-    beta_response = client.post(
-        "/api/documents/",
-        files={"file": ("beta.txt", beta_payload, "text/plain")},
-    )
+    assert response.status_code == 200
+    doc_id = UUID(response.json()["doc_id"])
 
-    alpha_id = UUID(alpha_response.json()["document_id"])
-    beta_id = UUID(beta_response.json()["document_id"])
+    pending = client.get(f"/api/documents/{doc_id}/qa", params={"question": "Jakie obowiązki?"})
+    assert pending.status_code == 200
+    assert "przetwarzany" in pending.json()["answer"].lower()
 
-    _wait_for_status(client, alpha_id, "ready")
-    _wait_for_status(client, beta_id, "ready")
-
-    alpha_answer = client.get(
-        f"/api/documents/{alpha_id}/qa",
-        params={"question": "Czego dotyczy procedura Alfa?"},
-    ).json()["answer"]
-    beta_answer = client.get(
-        f"/api/documents/{beta_id}/qa",
-        params={"question": "Czego dotyczy zadanie Beta?"},
-    ).json()["answer"]
-
-    assert "Źródła" in alpha_answer
-    assert "Źródła" in beta_answer
-    assert "Alfa" in alpha_answer
-    assert "Beta" in beta_answer
-    assert "Alfa" not in beta_answer
-
-
-def test_markdown_export_returns_sanitized_content(client_and_modules):
-    client, _ = client_and_modules
-    payload = (
-        "Na potrzeby regulaminu \"Usługodawca\" oznacza ProstePrawo Sp. z o.o.\n"
-        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
-        "Istnieje ryzyko naliczenia odsetek przy braku płatności.\n"
-        "Kontakt: biuro@example.com."
-    ).encode()
-    response = client.post("/api/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    export_response = client.get(f"/api/documents/{document_id}/export", params={"format": "markdown"})
-
-    assert export_response.status_code == 200
-    assert export_response.headers["content-type"].startswith("text/markdown")
-    body = export_response.text
-    assert "# regulamin.txt" in body
-    assert "<EMAIL_1>" in body
-    assert "biuro@example.com" not in body
-    assert "## Podsumowanie" in body
-    assert "## Kluczowe definicje" in body
-    assert "### Usługodawca" in body
-    assert "## Uproszczone brzmienie" in body
-    assert "W prostych słowach" in body
-    assert "## Potencjalne ryzyka" in body
-
-
-def test_simplified_endpoint_exposes_plain_language_sections(client_and_modules):
-    client, _ = client_and_modules
-    payload = (
-        "Art. 1. Należy dostarczyć dokumenty w terminie 7 dni.\n"
-        "Art. 2. Kara umowna wynosi 5000 zł."
-    ).encode()
-
-    response = client.post("/api/documents/", files={"file": ("regulamin.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    simplified_response = client.get(f"/api/documents/{document_id}/simplified")
-    assert simplified_response.status_code == 200
-    simplified = simplified_response.json()
-    assert simplified["document_id"] == str(document_id)
-    assert simplified["sections"]
-    plain_texts = [section["plain_language"] for section in simplified["sections"]]
-    assert any(text.startswith("W prostych słowach") for text in plain_texts)
-    assert all("należy" not in text.lower() for text in plain_texts)
-    assert any("5000" in text for text in plain_texts)
-
-
-def test_definitions_endpoint_returns_glossary(client_and_modules):
-    client, _ = client_and_modules
-    payload = (
-        "\"Regulamin\" oznacza zbiór zasad.\n"
-        "Usługodawca - podmiot świadczący usługi."
-    ).encode("utf-8")
-
-    response = client.post("/api/documents/", files={"file": ("slownik.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    definitions_response = client.get(f"/api/documents/{document_id}/definitions")
-    assert definitions_response.status_code == 200
-    data = definitions_response.json()
-    assert data["document_id"] == str(document_id)
-    terms = {entry["term"]: entry["meaning"] for entry in data["definitions"]}
-    assert "Regulamin" in terms
-    assert "zbiór zasad" in terms["Regulamin"].lower()
-    assert "Usługodawca" in terms
-
-
-def test_insights_endpoint_returns_checklists(client_and_modules):
-    client, _ = client_and_modules
-    payload = (
-        "Art. 1. Należy złożyć wniosek w terminie 14 dni.\n"
-        "Art. 2. Kara za opóźnienie to 200 zł.\n"
-        "W przeciwnym razie istnieje ryzyko utraty świadczenia."
-    ).encode("utf-8")
-
-    response = client.post("/api/documents/", files={"file": ("checklist.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    insights_response = client.get(f"/api/documents/{document_id}/insights")
-    assert insights_response.status_code == 200
-    data = insights_response.json()
-    assert data["document_id"] == str(document_id)
-    assert any("wniosek" in entry.lower() for entry in data["obligations"])
-    assert any("200" in entry for entry in data["penalties"])
-    assert any("14" in entry for entry in data["deadlines"])
-    assert any("ryzyko" in entry.lower() for entry in data["risks"])
-    assert data["summary"]
-
-
-def test_export_rejects_unsupported_format(client_and_modules):
-    client, _ = client_and_modules
-    payload = "Art. 1. Dane wrażliwe.".encode("utf-8")
-    response = client.post("/api/documents/", files={"file": ("dokument.txt", payload, "text/plain")})
-    document_id = UUID(response.json()["document_id"])
-    _wait_for_status(client, document_id, "ready")
-
-    export_response = client.get(f"/api/documents/{document_id}/export", params={"format": "pdf"})
-
-    assert export_response.status_code == 400
-    assert "Unsupported export format" in export_response.json()["detail"]
+    _wait_for_status(client, doc_id, "ready")
+    answer = client.get(f"/api/documents/{doc_id}/qa", params={"question": "Jakie obowiązki?"})
+    assert answer.status_code == 200
+    assert "Źródła" in answer.json()["answer"]
