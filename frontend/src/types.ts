@@ -15,7 +15,8 @@ export interface TokenUsageMetrics {
 }
 
 export interface DocumentMetadataPublic {
-  document_id: string;
+  user_id: number;
+  doc_id: string;
   title: string;
   created_at: string;
   status: DocumentStatus;
@@ -31,7 +32,8 @@ export interface DocumentMetadataPublic {
 export interface DocumentListItem extends DocumentMetadataPublic {}
 
 export interface SimplifiedResponse {
-  document_id: string;
+  user_id: number;
+  doc_id: string;
   sections: SectionSimplification[];
 }
 

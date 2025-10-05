@@ -151,7 +151,7 @@ function DocumentList({ documents, isLoading, onRefresh }) {
         e(
           'li',
           {
-            key: document.document_id,
+            key: document.doc_id,
             className: `document-item status-${document.status}`
           },
           e(
@@ -203,7 +203,7 @@ function DocumentList({ documents, isLoading, onRefresh }) {
             { className: 'document-actions' },
             e(
               Link,
-              { to: `/documents/${document.document_id}` },
+              { to: `/documents/${document.doc_id}` },
               'Otwórz'
             )
           )

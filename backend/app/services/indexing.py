@@ -27,20 +27,22 @@ class SimpleIndexer:
     """In-memory TF-IDF like index designed for deterministic unit tests."""
 
     def __init__(self) -> None:
-        self._documents: dict[UUID, list[DocumentSection]] = {}
-        self._term_stats: dict[str, Counter[tuple[UUID, str]]] = {}
+        self._documents: dict[tuple[int, UUID], list[DocumentSection]] = {}
+        self._term_stats: dict[str, Counter[tuple[int, UUID, str]]] = {}
 
-    def index(self, document_id: UUID, sections: Iterable[DocumentSection]) -> None:
+    def index(self, user_id: int, document_id: UUID, sections: Iterable[DocumentSection]) -> None:
         sections = list(sections)
-        self._documents[document_id] = sections
+        key = (user_id, document_id)
+        self._documents[key] = sections
         for section in sections:
             term_counts = Counter(_tokenize(section.text))
             for term, count in term_counts.items():
-                key = (document_id, section.identifier)
-                self._term_stats.setdefault(term, Counter())[key] = count
+                posting = (user_id, document_id, section.identifier)
+                self._term_stats.setdefault(term, Counter())[posting] = count
 
-    def retrieve(self, document_id: UUID, query: str, top_k: int = 3) -> list[RetrievedChunk]:
-        sections = self._documents.get(document_id, [])
+    def retrieve(self, user_id: int, document_id: UUID, query: str, top_k: int = 3) -> list[RetrievedChunk]:
+        key = (user_id, document_id)
+        sections = self._documents.get(key, [])
         if not sections:
             return []
         query_terms = Counter(_tokenize(query))
@@ -50,10 +52,10 @@ class SimpleIndexer:
             postings = self._term_stats.get(term)
             if not postings:
                 continue
-            doc_freq = len({doc_id for doc_id, _ in postings})
+            doc_freq = len({(doc_id, uid) for uid, doc_id, _ in postings})
             idf = math.log(1 + len(self._documents) / (1 + doc_freq))
-            for (posting_doc_id, identifier), freq in postings.items():
-                if posting_doc_id != document_id:
+            for (posting_user_id, posting_doc_id, identifier), freq in postings.items():
+                if posting_doc_id != document_id or posting_user_id != user_id:
                     continue
                 if identifier not in section_by_id:
                     continue

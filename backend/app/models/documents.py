@@ -47,7 +47,8 @@ class DocumentDefinition(BaseModel):
 class DocumentSimplifiedResponse(BaseModel):
     """Payload returned for simplified document views."""
 
-    document_id: UUID
+    user_id: int
+    doc_id: UUID
     sections: list[SectionSimplification] = Field(default_factory=list)
 
 
@@ -63,7 +64,8 @@ class DocumentProcessingStatus(str, Enum):
 class DocumentMetadata(BaseModel):
     """Persisted metadata tracked for each document."""
 
-    document_id: UUID = Field(default_factory=uuid4)
+    user_id: int
+    doc_id: UUID = Field(default_factory=uuid4)
     title: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     status: DocumentProcessingStatus = DocumentProcessingStatus.RECEIVED
@@ -85,7 +87,8 @@ class DocumentMetadata(BaseModel):
         """Expose a sanitized view suitable for API responses."""
 
         return DocumentMetadataPublic(
-            document_id=self.document_id,
+            user_id=self.user_id,
+            doc_id=self.doc_id,
             title=self.title,
             created_at=self.created_at,
             status=self.status,
@@ -105,7 +108,8 @@ class DocumentMetadata(BaseModel):
 class DocumentMetadataPublic(BaseModel):
     """Subset of metadata fields safe to return to API consumers."""
 
-    document_id: UUID
+    user_id: int
+    doc_id: UUID
     title: str
     created_at: datetime
     status: DocumentProcessingStatus
@@ -124,21 +128,24 @@ class DocumentMetadataPublic(BaseModel):
 class DocumentCreateResponse(BaseModel):
     """Response payload for a document upload."""
 
-    document_id: UUID
+    user_id: int
+    doc_id: UUID
     status: DocumentProcessingStatus
 
 
 class DocumentDefinitionsResponse(BaseModel):
     """Response payload for the definitions endpoint."""
 
-    document_id: UUID
+    user_id: int
+    doc_id: UUID
     definitions: list[DocumentDefinition] = Field(default_factory=list)
 
 
 class DocumentInsightsResponse(BaseModel):
     """Response payload for checklist-style document insights."""
 
-    document_id: UUID
+    user_id: int
+    doc_id: UUID
     summary: str | None = None
     obligations: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)

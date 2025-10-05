@@ -70,8 +70,13 @@ roadmap.md (plan rozwoju)
    pip install -r requirements.txt
    ```
 
-2. Skonfiguruj zmienne środowiskowe (np. `OPENAI_API_KEY`, ścieżki do Elasticsearch/FAISS) i katalog na pliki (`/data`).
+2. Skonfiguruj zmienne środowiskowe (np. `OPENAI_API_KEY`, parametry logowania SMTP, klucze Turnstile) i katalog na pliki (`/data`).
    Możesz skopiować plik `.example.env` do `.env` i uzupełnić wartości zgodnie ze swoją konfiguracją.
+   Najważniejsze nowe ustawienia to:
+   - `PROSTE_PRAWO_SESSION_SECRET_KEY` – klucz do podpisywania ciasteczek sesji.
+   - Sekcja `PROSTE_PRAWO_SMTP__*` – host, port, dane logowania i adres nadawcy do wysyłki maili.
+   - `PROSTE_PRAWO_VERIFICATION__BASE_URL` oraz `PROSTE_PRAWO_PASSWORD_RESET__BASE_URL` – adresy frontendu z formularzami potwierdzenia i resetu.
+   - `PROSTE_PRAWO_TURNSTILE_SITE_KEY` / `PROSTE_PRAWO_TURNSTILE_SECRET_KEY` – klucze Cloudflare Turnstile (można wyłączyć przez `PROSTE_PRAWO_DISABLE_CLOUDFLARE_TURNSTILE=true`).
 
 3. Uruchom serwer deweloperski:
    ```bash

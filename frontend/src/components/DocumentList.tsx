@@ -30,7 +30,7 @@ function DocumentList({ documents, isLoading, onRefresh }: DocumentListProps) {
       {!isLoading && documents.length === 0 && <p>Brak dokumentów. Prześlij plik aby rozpocząć analizę.</p>}
       <ul className="document-list">
         {documents.map((document) => (
-          <li key={document.document_id} className={`document-item status-${document.status}`}>
+          <li key={document.doc_id} className={`document-item status-${document.status}`}>
             <div className="document-info">
               <div>
                 <p className="document-title">{document.title}</p>
@@ -60,7 +60,7 @@ function DocumentList({ documents, isLoading, onRefresh }: DocumentListProps) {
               )}
             </div>
             <div className="document-actions">
-              <Link to={`/documents/${document.document_id}`}>Otwórz</Link>
+              <Link to={`/documents/${document.doc_id}`}>Otwórz</Link>
             </div>
           </li>
         ))}
