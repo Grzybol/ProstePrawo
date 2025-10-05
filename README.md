@@ -23,6 +23,18 @@ Monolityczna aplikacja FastAPI z wbudowanym frontendem (React + Vite) obejmuje n
 
 Szczegółowe diagramy i decyzje architektoniczne znajdują się w `docs/architecture.md`.
 
+## Aktualny flow przetwarzania
+
+1. **Upload** – plik trafia do katalogu `/data/{user_id}/{doc_id}/raw` wraz z metadanymi sesji.
+2. **Preprocess** – normalizacja tekstu, OCR i wykrywanie struktury; wersja robocza przechowywana jest w `/data/{user_id}/{doc_id}/preprocessed`.
+3. **Local LLM bootstrap** – inicjalizacja kontekstu użytkownika z pamięci w `/data/llm_store/{user_id}` oraz wczytanie cache modeli.
+4. **Segmentation** – dzielenie na jednostki redakcyjne i tworzenie chunków roboczych (`segments.json`).
+5. **Sanitize** – anonimizacja PII z mapowaniem zapisanym w `/data/{user_id}/{doc_id}/secure/pii_map.json`.
+6. **Parallel OpenAI Simplify** – równoległe upraszczanie segmentów z użyciem funkcji `run_parallel_simplify`, z wynikami tymczasowymi w `/data/{user_id}/{doc_id}/simplified`.
+7. **Validation/Feedback** – kontrola jakości i walidacja reguł (np. długość, kompletność cytatów), z komentarzami użytkownika w `feedback.json`.
+8. **Local LLM update** – aktualizacja pamięci kontekstowej i embeddingów w magazynie per użytkownik (`/data/llm_store/{user_id}`) na podstawie zatwierdzonych segmentów.
+9. **Live Q&A/Export** – wystawienie upraszczonego dokumentu do modułu zapytań i eksportów (PDF/DOCX/Markdown) z artefaktami w `/data/{user_id}/{doc_id}/exports`.
+
 ## Stos technologiczny
 
 - **Backend:** Python 3.12, FastAPI, structlog/loguru, SQLite (MVP) / MariaDB, WeasyPrint.
