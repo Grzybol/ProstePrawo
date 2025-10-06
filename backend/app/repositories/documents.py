@@ -12,6 +12,16 @@ from ..core.config import get_settings
 from ..models.documents import DocumentMetadata, DocumentProcessingStatus
 
 
+_CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS documents (
+    user_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (user_id, doc_id)
+)
+"""
+
+
 class DocumentRepository:
     """Persist :class:`DocumentMetadata` instances in SQLite."""
 
@@ -20,6 +30,7 @@ class DocumentRepository:
         self._db_path = db_path or settings.data_dir / "metadata.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
+        self._migrate_schema_if_needed()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -28,16 +39,32 @@ class DocumentRepository:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS documents (
-                    user_id TEXT NOT NULL,
-                    doc_id TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    PRIMARY KEY (user_id, doc_id)
+            conn.execute(_CREATE_TABLE_SQL)
+
+    def _migrate_schema_if_needed(self) -> None:
+        with self._connect() as conn:
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "user_id" in columns:
+                return
+
+            rows = [
+                {"doc_id": row["doc_id"], "payload": row["payload"]}
+                for row in conn.execute("SELECT doc_id, payload FROM documents").fetchall()
+            ]
+
+            conn.execute("DROP TABLE documents")
+            conn.execute(_CREATE_TABLE_SQL)
+
+            for row in rows:
+                payload_data = json.loads(row["payload"])
+                user_id = int(payload_data.get("user_id", 0))
+                payload_data["user_id"] = user_id
+                conn.execute(
+                    "REPLACE INTO documents (user_id, doc_id, payload) VALUES (?, ?, ?)",
+                    (str(user_id), row["doc_id"], json.dumps(payload_data)),
                 )
-                """
-            )
 
     def upsert(self, document: DocumentMetadata) -> None:
         payload = json.dumps(_serialize_document(document))
