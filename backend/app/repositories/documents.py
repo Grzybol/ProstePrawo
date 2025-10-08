@@ -46,13 +46,21 @@ class DocumentRepository:
             columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()
             }
-            if "user_id" in columns:
+            if {"user_id", "doc_id", "payload"}.issubset(columns):
                 return
 
-            rows = [
-                {"doc_id": row["doc_id"], "payload": row["payload"]}
-                for row in conn.execute("SELECT doc_id, payload FROM documents").fetchall()
-            ]
+            legacy_rows = conn.execute("SELECT * FROM documents").fetchall()
+            rows = []
+            for row in legacy_rows:
+                row_dict = dict(row)
+                payload_data = json.loads(row_dict["payload"])
+
+                doc_id = row_dict.get("doc_id") or row_dict.get("id") or payload_data.get("doc_id")
+                if doc_id is None:
+                    raise sqlite3.OperationalError("Unable to determine document identifier during migration")
+
+                payload_data["doc_id"] = str(doc_id)
+                rows.append({"doc_id": str(doc_id), "payload": json.dumps(payload_data)})
 
             conn.execute("DROP TABLE documents")
             conn.execute(_CREATE_TABLE_SQL)
