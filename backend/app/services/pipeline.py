@@ -247,7 +247,7 @@ class DocumentPipeline:
             metadata.extra["validation"] = validation
             if validation["issues"]:
                 metadata.extra["needs_review"] = validation["issues"]
-                metadata.status = DocumentProcessingStatus.PROCESSING
+                metadata.status = DocumentProcessingStatus.NEEDS_REVIEW
                 await self._emit_event(
                     "ValidationFailed",
                     metadata,
@@ -430,7 +430,10 @@ class DocumentPipeline:
 
     def get_simplified_sections(self, user_id: int, doc_id: UUID) -> list[SectionSimplification]:
         metadata = self._get(user_id, doc_id)
-        if metadata.status != DocumentProcessingStatus.READY:
+        if metadata.status not in (
+            DocumentProcessingStatus.READY,
+            DocumentProcessingStatus.NEEDS_REVIEW,
+        ):
             raise DocumentNotReadyError(user_id, doc_id)
         return list(metadata.simplified_sections)
 

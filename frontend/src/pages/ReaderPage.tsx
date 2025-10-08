@@ -6,9 +6,18 @@ import QaModal from '../components/QaModal';
 import CostOverviewPanel from '../components/CostOverviewPanel';
 import type {
   DocumentMetadataPublic,
+  DocumentStatus,
   SectionSimplification,
   SimplifiedResponse
 } from '../types';
+
+const statusLabels: Record<DocumentStatus, string> = {
+  received: 'odebrany',
+  processing: 'przetwarzanie',
+  needs_review: 'wymaga weryfikacji',
+  ready: 'gotowy',
+  failed: 'błąd'
+};
 
 function ReaderPage() {
   const { documentId } = useParams();
@@ -64,6 +73,7 @@ function ReaderPage() {
   }, [activeSection]);
 
   const ready = metadata?.status === 'ready';
+  const reviewable = metadata?.status === 'ready' || metadata?.status === 'needs_review';
 
   const insights = useMemo(() => {
     if (!metadata) {
@@ -89,7 +99,12 @@ function ReaderPage() {
             ← Wróć
           </button>
           <h1>{metadata?.title ?? 'Dokument'}</h1>
-          <p>Status: {metadata?.status ?? 'ładowanie...'}</p>
+          <p>Status: {metadata ? statusLabels[metadata.status] : 'ładowanie...'}</p>
+          {metadata?.status === 'needs_review' && (
+            <p className="status-message">
+              Wykryto potencjalne problemy wymagające weryfikacji. Zapoznaj się z uproszczeniami i potwierdź poprawność.
+            </p>
+          )}
         </div>
         <div className="reader-tools">
           <label>
@@ -106,7 +121,7 @@ function ReaderPage() {
       </header>
       {isLoading && <p>Ładowanie dokumentu...</p>}
       {error && <p className="error-message">{error}</p>}
-      {!isLoading && !error && (
+      {!isLoading && !error && reviewable && (
         <>
           <SectionViewer
             sections={sections}
@@ -133,6 +148,11 @@ function ReaderPage() {
             ))}
           </aside>
         </>
+      )}
+      {!isLoading && !error && !reviewable && (
+        <p className="status-message">
+          Dokument jest nadal w trakcie przetwarzania. Spróbuj ponownie później.
+        </p>
       )}
       {showQa && (
         <QaModal

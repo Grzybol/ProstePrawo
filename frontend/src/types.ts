@@ -1,4 +1,9 @@
-export type DocumentStatus = 'received' | 'processing' | 'ready' | 'failed';
+export type DocumentStatus =
+  | 'received'
+  | 'processing'
+  | 'needs_review'
+  | 'ready'
+  | 'failed';
 
 export interface SectionSimplification {
   identifier: string;
@@ -27,6 +32,7 @@ export interface DocumentMetadataPublic {
   risks: string[];
   simplified_sections: SectionSimplification[];
   token_usage: TokenUsageMetrics;
+  extra?: Record<string, any>;
 }
 
 export interface DocumentListItem extends DocumentMetadataPublic {}
