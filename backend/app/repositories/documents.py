@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from ..core.config import get_settings
 from ..models.documents import DocumentMetadata, DocumentProcessingStatus
@@ -55,9 +55,9 @@ class DocumentRepository:
                 row_dict = dict(row)
                 payload_data = json.loads(row_dict["payload"])
 
-                doc_id = row_dict.get("doc_id") or row_dict.get("id") or payload_data.get("doc_id")
+                doc_id = _resolve_document_id(row_dict, payload_data)
                 if doc_id is None:
-                    raise sqlite3.OperationalError("Unable to determine document identifier during migration")
+                    doc_id = str(uuid4())
 
                 payload_data["doc_id"] = str(doc_id)
                 rows.append({"doc_id": str(doc_id), "payload": json.dumps(payload_data)})
@@ -151,3 +151,34 @@ def _deserialize_document(
         if value:
             parsed[path_key] = Path(value)
     return DocumentMetadata(**parsed)
+
+
+def _resolve_document_id(row: dict, payload_data: dict) -> str | None:
+    """Try to recover the document identifier from legacy rows.
+
+    Older schemas stored the identifier in a couple of different fields. When the
+    migration runs we attempt to read all known locations before finally falling
+    back to generating a new identifier.
+    """
+
+    candidate_keys = ["doc_id", "id", "docId", "document_id", "documentId"]
+
+    def _first_present(mapping: dict | None) -> str | None:
+        if not isinstance(mapping, dict):
+            return None
+        for key in candidate_keys:
+            value = mapping.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    doc_id = _first_present(row) or _first_present(payload_data)
+    if doc_id is not None:
+        return doc_id
+
+    for nested_key in ("metadata", "document"):
+        nested_doc_id = _first_present(payload_data.get(nested_key))
+        if nested_doc_id is not None:
+            return nested_doc_id
+
+    return None
