@@ -57,6 +57,7 @@ class DocumentProcessingStatus(str, Enum):
 
     RECEIVED = "received"
     PROCESSING = "processing"
+    NEEDS_REVIEW = "needs_review"
     READY = "ready"
     FAILED = "failed"
 
