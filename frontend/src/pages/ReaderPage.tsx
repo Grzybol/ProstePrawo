@@ -30,8 +30,8 @@ function ReaderPage() {
       setError(null);
       try {
         const [metaResponse, simplifiedResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/documents/${documentId}`),
-          fetch(`${API_BASE_URL}/documents/${documentId}/simplified`)
+          fetch(`${API_BASE_URL}/documents/${documentId}`, { credentials: 'include' }),
+          fetch(`${API_BASE_URL}/documents/${documentId}/simplified`, { credentials: 'include' })
         ]);
         if (metaResponse.status === 404) {
           setError('Nie znaleziono dokumentu.');
