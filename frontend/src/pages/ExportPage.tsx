@@ -31,7 +31,9 @@ function ExportPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ format, restore_pii: restorePii ? 'true' : 'false' });
-      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/export?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/export?${params.toString()}`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         const details = await response.text();
         throw new Error(details || 'Nie udało się wygenerować eksportu.');

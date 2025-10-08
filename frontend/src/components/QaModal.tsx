@@ -43,7 +43,9 @@ function QaModal({ documentId, onClose, onHighlightSource }: QaModalProps) {
     setAnswer(null);
     try {
       const params = new URLSearchParams({ question });
-      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/qa?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/qa?${params.toString()}`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         throw new Error('Nie udało się pobrać odpowiedzi.');
       }

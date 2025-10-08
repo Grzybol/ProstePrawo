@@ -12,6 +12,8 @@ from ..models.auth import PasswordResetToken, User, VerificationToken
 
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"
+DEMO_USER_EMAIL = "demo@prosteprawo.local"
+DEMO_USER_PASSWORD_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKGheu"
 
 
 class UserRepository:
@@ -127,6 +129,19 @@ class UserRepository:
             rows = conn.execute("SELECT * FROM users ORDER BY created_at").fetchall()
         for row in rows:
             yield _row_to_user(row)
+
+    def ensure_demo_user(self) -> User:
+        """Return a demo user, creating it when missing.
+
+        In development environments we automatically provision a placeholder
+        account to simplify manual testing without going through the
+        registration flow.
+        """
+
+        user = self.get_user_by_email(DEMO_USER_EMAIL)
+        if user is not None:
+            return user
+        return self.create_user(DEMO_USER_EMAIL, DEMO_USER_PASSWORD_HASH, is_verified=True)
 
     # ------------------------------------------------------------------
     # Verification tokens
@@ -257,3 +272,4 @@ def _parse_datetime(value: str) -> datetime:
     if not value:
         raise ValueError("Empty datetime value")
     return datetime.strptime(value, ISO_FORMAT)
+

@@ -11,7 +11,9 @@ function DashboardPage() {
   const loadDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/documents/`);
+      const response = await fetch(`${API_BASE_URL}/documents/`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         throw new Error('Nie udało się pobrać dokumentów.');
       }

@@ -26,7 +26,8 @@ function UploadZone({ onUploadComplete }: UploadZoneProps) {
       try {
         const response = await fetch(`${API_BASE_URL}/documents/`, {
           method: 'POST',
-          body: formData
+          body: formData,
+          credentials: 'include'
         });
         if (!response.ok) {
           const message = await response.text();
