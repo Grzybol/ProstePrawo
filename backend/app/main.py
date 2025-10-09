@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .api.routes import auth, documents, health
+from .api.routes import auth, documents, health, templates
 
 
 BASE_DIR = _discover_project_root()
@@ -56,6 +56,7 @@ api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router)
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 app.include_router(api_router)
 
 
