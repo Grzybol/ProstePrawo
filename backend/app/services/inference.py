@@ -53,8 +53,15 @@ def _build_summary_local(text: str) -> str:
     return first
 
 
+def _has_meaningful_text(text: str) -> bool:
+    return bool(text and text.strip())
+
+
 def build_summary(text: str, use_cloud: bool | None = None) -> tuple[str, DocumentUsageMetrics]:
     """Return a short summary, preferring OpenAI when available."""
+
+    if not _has_meaningful_text(text):
+        return _build_summary_local(text), _zero_usage()
 
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
@@ -80,6 +87,9 @@ def _collect_sentences(text: str, keywords: Iterable[str]) -> list[str]:
 
 
 def extract_obligations(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
+    if not _has_meaningful_text(text):
+        return [], _zero_usage()
+
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
@@ -92,6 +102,9 @@ def extract_obligations(text: str, use_cloud: bool | None = None) -> tuple[list[
 
 
 def extract_penalties(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
+    if not _has_meaningful_text(text):
+        return [], _zero_usage()
+
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
@@ -104,6 +117,9 @@ def extract_penalties(text: str, use_cloud: bool | None = None) -> tuple[list[st
 
 
 def extract_deadlines(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
+    if not _has_meaningful_text(text):
+        return [], _zero_usage()
+
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
@@ -116,6 +132,9 @@ def extract_deadlines(text: str, use_cloud: bool | None = None) -> tuple[list[st
 
 
 def extract_risks(text: str, use_cloud: bool | None = None) -> tuple[list[str], DocumentUsageMetrics]:
+    if not _has_meaningful_text(text):
+        return [], _zero_usage()
+
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
@@ -188,6 +207,8 @@ def simplify_sections(
     """Generate plain-language explanations using OpenAI when enabled."""
 
     section_list = list(sections)
+    if not any(_has_meaningful_text(section.text) for section in section_list):
+        return [], _zero_usage()
     if _should_use_cloud(use_cloud):
         client = get_openai_client()
         try:
