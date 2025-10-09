@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -59,4 +61,22 @@ def test_simplify_sections_skips_cloud_when_all_text_blank(monkeypatch):
     assert result == []
     assert usage.prompt_tokens == 0
     assert usage.completion_tokens == 0
+    assert usage.total_tokens == 0
+
+
+def test_generate_document_template_requires_prompt():
+    with pytest.raises(ValueError):
+        inference.generate_document_template("  \n  ", "PL")
+
+
+def test_generate_document_template_local_builder(monkeypatch):
+    monkeypatch.setattr(inference, "_should_use_cloud", lambda use_cloud: False)
+
+    template, usage = inference.generate_document_template(
+        "Umowa o świadczenie usług IT", "pl"
+    )
+
+    assert "Wzór dokumentu" in template
+    assert "Umowa o świadczenie usług IT" in template
+    assert "Polsce" in template
     assert usage.total_tokens == 0

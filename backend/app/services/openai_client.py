@@ -280,6 +280,43 @@ class OpenAIClient:
             raise OpenAIClientError("Brak treści odpowiedzi Q&A.")
         return {"answer": answer, "sources": sources}, usage
 
+    def generate_document_template(
+        self, prompt: str, country: str
+    ) -> tuple[str, dict[str, int]]:
+        logger.debug(
+            "Requesting OpenAI document template (country=%s, prompt_length=%d)",
+            country,
+            len(prompt),
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Jesteś prawniczym asystentem, który przygotowuje wzory dokumentów w "
+                    "oparciu o najnowsze wytyczne i praktykę danego kraju. Zawsze korzystaj z "
+                    "języka polskiego, zachowaj strukturę sekcji i dodaj wskazówki dotyczące "
+                    "zgodności z prawem."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Stwórz kompletny wzór dokumentu w formacie Markdown. "
+                    "Kraj: {country}. Kontekst: {prompt}. Uwzględnij aktualne wymagania "
+                    "prawne i rekomenduj, w jakich miejscach należy wpisać dane stron, "
+                    "podstawę prawną, obowiązki, postanowienia dotyczące ochrony danych, "
+                    "terminy oraz podpisy. Dodaj na końcu notatkę o konieczności weryfikacji "
+                    "z prawnikiem."
+                ).format(country=country, prompt=prompt)
+            },
+        ]
+        template, usage = self._complete(messages, max_tokens=1200)
+        logger.debug(
+            "Received OpenAI document template response (%s)",
+            self._summarise_content_for_log(template),
+        )
+        return template, usage
+
     def _complete(
         self,
         messages: list[dict[str, str]],

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 import textwrap
-from typing import Iterable
+from typing import Callable, Iterable
 
 from ..core.config import get_settings
 from ..models.documents import DocumentDefinition, DocumentUsageMetrics, SectionSimplification
@@ -385,3 +385,111 @@ def _clean_meaning(meaning: str) -> str:
     cleaned = meaning.strip().rstrip(".;")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned
+
+
+_SUPPORTED_TEMPLATE_BUILDERS: dict[str, Callable[[str], str]] = {}
+
+
+def generate_document_template(
+    prompt: str, country: str, use_cloud: bool | None = None
+) -> tuple[str, DocumentUsageMetrics]:
+    """Create a document template adjusted to the selected jurisdiction."""
+
+    cleaned_prompt = prompt.strip()
+    if not cleaned_prompt:
+        raise ValueError("Opis dokumentu nie może być pusty.")
+
+    normalised_country = country.strip().upper() or "PL"
+    builder = _SUPPORTED_TEMPLATE_BUILDERS.get(normalised_country)
+
+    if builder is None:
+        if normalised_country == "PL":
+            builder = _generate_template_pl_local
+            _SUPPORTED_TEMPLATE_BUILDERS[normalised_country] = builder
+        else:
+            raise ValueError(
+                "Obsługujemy obecnie jedynie generowanie wzorów dla Polski (PL)."
+            )
+
+    if _has_meaningful_text(cleaned_prompt) and _should_use_cloud(use_cloud):
+        client = get_openai_client()
+        try:
+            template, usage = client.generate_document_template(cleaned_prompt, normalised_country)
+            if template.strip():
+                return template.strip(), _usage_from_payload(usage)
+        except OpenAIClientError:
+            pass
+
+    return builder(cleaned_prompt), _zero_usage()
+
+
+def _generate_template_pl_local(prompt: str) -> str:
+    header = f"# Wzór dokumentu: {prompt}\n"
+    intro = (
+        "\n"
+        "Poniższa struktura opiera się na aktualnych wytycznych obowiązujących w Polsce "
+        "(stan na 2024 r.). Uzupełnij pola w nawiasach kwadratowych danymi właściwymi "
+        "dla konkretnej sprawy.\n"
+    )
+    sections = [
+        "## 1. Nagłówek\n- Miejscowość: [Miejscowość]\n- Data: [DD.MM.RRRR]\n",
+        (
+            "## 2. Strony umowy\n"
+            "- [Pełna nazwa/imię i nazwisko], [adres], [NIP/PESEL], reprezentowany przez [dane].\n"
+            "- [Pełna nazwa/imię i nazwisko], [adres], [NIP/PESEL], reprezentowany przez [dane].\n"
+        ),
+        (
+            "## 3. Podstawa prawna i definicje\n"
+            "- Oświadczenie o działaniu zgodnie z obowiązującymi przepisami prawa polskiego, w tym odpowiednimi ustawami sektorowymi.\n"
+            "- Definicje kluczowych pojęć wykorzystywanych w dokumencie.\n"
+        ),
+        (
+            "## 4. Przedmiot dokumentu\n"
+            "- Opis głównego celu: [szczegółowy opis zgodny z promptem].\n"
+            "- Zakres świadczeń/obowiązków stron.\n"
+        ),
+        (
+            "## 5. Oświadczenia i obowiązki stron\n"
+            "- Główne zobowiązania stron wraz z terminami wykonania.\n"
+            "- Wymogi zgodności z przepisami sektorowymi oraz RODO (jeżeli dotyczy).\n"
+        ),
+        (
+            "## 6. Postanowienia finansowe\n"
+            "- Warunki wynagrodzenia, sposób zapłaty, terminy fakturowania.\n"
+            "- Informacje o podatkach i kosztach dodatkowych.\n"
+        ),
+        (
+            "## 7. Terminy, wypowiedzenie i rozwiązanie\n"
+            "- Czas obowiązywania dokumentu.\n"
+            "- Procedury wypowiedzenia/rozwiązania wraz z okresem wypowiedzenia.\n"
+        ),
+        (
+            "## 8. Odpowiedzialność i sankcje\n"
+            "- Zakres odpowiedzialności stron.\n"
+            "- Kary umowne lub inne sankcje za naruszenia.\n"
+        ),
+        (
+            "## 9. Postanowienia dotyczące ochrony danych i poufności\n"
+            "- Klauzula poufności.\n"
+            "- Zasady przetwarzania danych osobowych zgodnie z RODO.\n"
+        ),
+        (
+            "## 10. Postanowienia końcowe\n"
+            "- Prawo właściwe i sąd właściwy.\n"
+            "- Klauzule dotyczące zmian dokumentu oraz komunikacji między stronami.\n"
+        ),
+        (
+            "## 11. Załączniki\n"
+            "- Lista załączników: [Załącznik nr 1], [Załącznik nr 2], ...\n"
+        ),
+        (
+            "## 12. Podpisy\n"
+            "- Podpis [Strona 1]\n"
+            "- Podpis [Strona 2]\n"
+        ),
+        (
+            "\n> **Uwaga:** Zweryfikuj dokument z aktualnymi przepisami branżowymi "
+            "i rozważ konsultację z radcą prawnym lub adwokatem przed zastosowaniem wzoru."
+        ),
+    ]
+    return header + intro + "\n".join(sections)
