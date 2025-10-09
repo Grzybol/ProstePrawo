@@ -41,6 +41,11 @@ function DocumentList({ documents, isLoading, onRefresh }: DocumentListProps) {
           const needsReviewIssues = Array.isArray(document.extra?.needs_review)
             ? (document.extra?.needs_review as unknown[])
             : null;
+          const rawProgress = document.extra?.progress;
+          const progress =
+            typeof rawProgress === 'number' && Number.isFinite(rawProgress)
+              ? Math.min(100, Math.max(0, Math.round(rawProgress)))
+              : null;
 
           return (
             <li key={document.doc_id} className={`document-item status-${document.status}`}>
@@ -50,6 +55,14 @@ function DocumentList({ documents, isLoading, onRefresh }: DocumentListProps) {
                   <p className="document-meta">
                     Utworzono: {new Date(document.created_at).toLocaleString('pl-PL')} • Status: {statusLabels[document.status]}
                   </p>
+                  {document.status === 'processing' && progress !== null && (
+                    <div className="document-progress">
+                      <div className="progress-bar" aria-hidden="true">
+                        <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
+                      </div>
+                      <p className="progress-label">Postęp przetwarzania: {progress}%</p>
+                    </div>
+                  )}
                   {document.status === 'needs_review' && needsReviewIssues && (
                     <p className="status-message">
                       Dokument wymaga ręcznej weryfikacji {needsReviewIssues.length > 1 ? 'segmentów' : 'segmentu'}.

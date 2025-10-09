@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -108,6 +108,7 @@ class DocumentPipeline:
             metadata.status = DocumentProcessingStatus.PROCESSING
             self.repository.upsert(metadata)
             await self._emit_event("ProcessingStarted", metadata, title=metadata.title)
+            self._update_progress(metadata, 5.0)
 
             self._llm_store.bootstrap(user_id)
 
@@ -128,6 +129,7 @@ class DocumentPipeline:
                 encoding="utf-8",
             )
             await self._emit_event("SegmentsGenerated", metadata, count=len(segments))
+            self._update_progress(metadata, 15.0)
 
             sanitized_segments, entities, secrets = sanitizer.sanitize_segments(segments)
             sanitized_dir = base_dir / "sanitized"
@@ -163,6 +165,7 @@ class DocumentPipeline:
             metadata.sanitized_path = sanitized_document_path
             metadata.pii_placeholders = entities
             metadata.pii_secret_path = pii_path
+            self._update_progress(metadata, 25.0)
 
             sanitized_sections = [
                 ingestion.DocumentSection(identifier=segment.identifier, text=segment.text)
@@ -177,51 +180,96 @@ class DocumentPipeline:
                 flat_vectors.extend(segment.embedding)
             self._llm_store.store_vectors(user_id, flat_vectors)
             await self._emit_event("IndexUpdated", metadata, sections=len(sanitized_sections))
+            self._update_progress(metadata, 35.0)
 
             use_cloud = self._settings.enable_cloud_llm
             usage_totals = DocumentUsageMetrics()
 
-            summary, summary_usage = await asyncio.to_thread(
-                inference.build_summary, sanitized_text, use_cloud
-            )
+            analysis_tasks = {
+                asyncio.create_task(
+                    asyncio.to_thread(inference.build_summary, sanitized_text, use_cloud)
+                ): "summary",
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        inference.extract_obligations, sanitized_text, use_cloud
+                    )
+                ): "obligations",
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        inference.extract_penalties, sanitized_text, use_cloud
+                    )
+                ): "penalties",
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        inference.extract_deadlines, sanitized_text, use_cloud
+                    )
+                ): "deadlines",
+                asyncio.create_task(
+                    asyncio.to_thread(inference.extract_risks, sanitized_text, use_cloud)
+                ): "risks",
+            }
+
+            analysis_results: dict[str, tuple[Any, DocumentUsageMetrics]] = {}
+            total_analysis = len(analysis_tasks) or 1
+            completed_analysis = 0
+            analysis_start = 35.0
+            analysis_end = 55.0
+            analysis_range = analysis_end - analysis_start
+
+            for finished in asyncio.as_completed(analysis_tasks):
+                name = analysis_tasks[finished]
+                result = await finished
+                analysis_results[name] = result
+                completed_analysis += 1
+                progress_value = analysis_start + (completed_analysis / total_analysis) * analysis_range
+                self._update_progress(metadata, progress_value)
+
+            summary, summary_usage = analysis_results.get("summary", ("", DocumentUsageMetrics()))
             metadata.summary = summary
             usage_totals.accumulate(summary_usage)
 
-            obligations, obligations_usage = await asyncio.to_thread(
-                inference.extract_obligations, sanitized_text, use_cloud
+            obligations, obligations_usage = analysis_results.get(
+                "obligations", ([], DocumentUsageMetrics())
             )
             metadata.obligations = obligations
             usage_totals.accumulate(obligations_usage)
 
-            penalties, penalties_usage = await asyncio.to_thread(
-                inference.extract_penalties, sanitized_text, use_cloud
+            penalties, penalties_usage = analysis_results.get(
+                "penalties", ([], DocumentUsageMetrics())
             )
             metadata.penalties = penalties
             usage_totals.accumulate(penalties_usage)
 
-            deadlines, deadlines_usage = await asyncio.to_thread(
-                inference.extract_deadlines, sanitized_text, use_cloud
+            deadlines, deadlines_usage = analysis_results.get(
+                "deadlines", ([], DocumentUsageMetrics())
             )
             metadata.deadlines = deadlines
             usage_totals.accumulate(deadlines_usage)
 
-            risks, risks_usage = await asyncio.to_thread(
-                inference.extract_risks, sanitized_text, use_cloud
-            )
+            risks, risks_usage = analysis_results.get("risks", ([], DocumentUsageMetrics()))
             metadata.risks = risks
             usage_totals.accumulate(risks_usage)
 
+            simplify_start = 55.0
+            simplify_end = 80.0
+
+            def _on_simplify_progress(ratio: float) -> None:
+                target = simplify_start + max(0.0, min(1.0, ratio)) * (simplify_end - simplify_start)
+                self._update_progress(metadata, target)
+
             simplifications, simplify_usage = await self._run_parallel_simplify(
-                metadata, sanitized_sections, use_cloud
+                metadata, sanitized_sections, use_cloud, progress_callback=_on_simplify_progress
             )
             metadata.simplified_sections = simplifications
             usage_totals.accumulate(simplify_usage)
             await self._emit_event("SimplificationCompleted", metadata, sections=len(simplifications))
+            self._update_progress(metadata, simplify_end)
 
             definitions = await asyncio.to_thread(
                 inference.extract_definitions, sanitized_text
             )
             metadata.definitions = definitions
+            self._update_progress(metadata, 90.0)
 
             if usage_totals.total_tokens == 0 and (
                 usage_totals.prompt_tokens or usage_totals.completion_tokens
@@ -260,12 +308,14 @@ class DocumentPipeline:
 
             self._llm_store.update_context(user_id, "validation", validation)
             self.repository.upsert(metadata)
+            self._update_progress(metadata, 100.0)
             await self._emit_event("ProcessingCompleted", metadata, status=metadata.status.value)
         except Exception as exc:  # pragma: no cover - defensive path
             logger.exception("Processing workflow for %s/%s failed: %s", user_id, doc_id, exc)
             metadata.status = DocumentProcessingStatus.FAILED
             metadata.extra["error"] = str(exc)
             self.repository.upsert(metadata)
+            self._update_progress(metadata, 100.0)
             await self._emit_event("ProcessingFailed", metadata, error=str(exc))
 
     async def _run_parallel_simplify(
@@ -273,6 +323,7 @@ class DocumentPipeline:
         metadata: DocumentMetadata,
         sections: list[ingestion.DocumentSection],
         use_cloud: bool,
+        progress_callback: Callable[[float], None] | None = None,
     ) -> tuple[list[SectionSimplification], DocumentUsageMetrics]:
         semaphore = self._semaphores.setdefault(
             metadata.user_id, asyncio.Semaphore(self.MAX_OPENAI_CONCURRENCY)
@@ -302,12 +353,20 @@ class DocumentPipeline:
             return result, usage
 
         tasks = [asyncio.create_task(_simplify_chunk(chunk)) for chunk in chunks]
-        results = await asyncio.gather(*tasks)
+        total_chunks = len(tasks) or 1
+        completed_chunks = 0
         simplifications: list[SectionSimplification] = []
         total_usage = DocumentUsageMetrics()
-        for chunk_result, usage in results:
+        for future in asyncio.as_completed(tasks):
+            chunk_result, usage = await future
             simplifications.extend(chunk_result)
             total_usage.accumulate(usage)
+            completed_chunks += 1
+            if progress_callback is not None:
+                ratio = completed_chunks / total_chunks
+                progress_callback(ratio)
+        if not tasks and progress_callback is not None:
+            progress_callback(1.0)
         return simplifications, total_usage
 
     async def _validate_document(
@@ -494,6 +553,17 @@ class DocumentPipeline:
             return self.repository.get(user_id, doc_id)
         except KeyError as exc:
             raise DocumentNotFoundError(user_id, doc_id) from exc
+
+    def _update_progress(self, metadata: DocumentMetadata, value: float) -> None:
+        try:
+            current = float(metadata.extra.get("progress", 0.0))
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            current = 0.0
+        clamped = max(0.0, min(100.0, float(value)))
+        if clamped <= current:
+            return
+        metadata.extra["progress"] = round(clamped, 2)
+        self.repository.upsert(metadata)
 
 
 def _contains_pii(text: str) -> bool:
