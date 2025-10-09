@@ -185,29 +185,29 @@ class DocumentPipeline:
             use_cloud = self._settings.enable_cloud_llm
             usage_totals = DocumentUsageMetrics()
 
-            analysis_tasks = {
+            async def _run_analysis(
+                name: str, func: Callable[..., Any]
+            ) -> tuple[str, tuple[Any, DocumentUsageMetrics]]:
+                result = await asyncio.to_thread(func, sanitized_text, use_cloud)
+                return name, result
+
+            analysis_tasks = [
                 asyncio.create_task(
-                    asyncio.to_thread(inference.build_summary, sanitized_text, use_cloud)
-                ): "summary",
+                    _run_analysis("summary", inference.build_summary)
+                ),
                 asyncio.create_task(
-                    asyncio.to_thread(
-                        inference.extract_obligations, sanitized_text, use_cloud
-                    )
-                ): "obligations",
+                    _run_analysis("obligations", inference.extract_obligations)
+                ),
                 asyncio.create_task(
-                    asyncio.to_thread(
-                        inference.extract_penalties, sanitized_text, use_cloud
-                    )
-                ): "penalties",
+                    _run_analysis("penalties", inference.extract_penalties)
+                ),
                 asyncio.create_task(
-                    asyncio.to_thread(
-                        inference.extract_deadlines, sanitized_text, use_cloud
-                    )
-                ): "deadlines",
+                    _run_analysis("deadlines", inference.extract_deadlines)
+                ),
                 asyncio.create_task(
-                    asyncio.to_thread(inference.extract_risks, sanitized_text, use_cloud)
-                ): "risks",
-            }
+                    _run_analysis("risks", inference.extract_risks)
+                ),
+            ]
 
             analysis_results: dict[str, tuple[Any, DocumentUsageMetrics]] = {}
             total_analysis = len(analysis_tasks) or 1
@@ -217,8 +217,7 @@ class DocumentPipeline:
             analysis_range = analysis_end - analysis_start
 
             for finished in asyncio.as_completed(analysis_tasks):
-                name = analysis_tasks[finished]
-                result = await finished
+                name, result = await finished
                 analysis_results[name] = result
                 completed_analysis += 1
                 progress_value = analysis_start + (completed_analysis / total_analysis) * analysis_range
