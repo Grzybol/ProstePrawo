@@ -230,7 +230,25 @@ class DocumentPipeline:
                     name = analysis_tasks.pop(finished, None)
                     if name is None:
                         continue
-                    analysis_results[name] = await finished
+                    finished_name, finished_result = await finished
+                    if finished_name != name:
+                        logger.debug(
+                            "Analysis task name mismatch: expected %%s, got %%s",
+                            name,
+                            finished_name,
+                        )
+                    if (
+                        not isinstance(finished_result, tuple)
+                        or len(finished_result) != 2
+                        or not isinstance(finished_result[1], DocumentUsageMetrics)
+                    ):
+                        logger.error(
+                            "Unexpected analysis result structure for %s: %r",
+                            name,
+                            finished_result,
+                        )
+                        continue
+                    analysis_results[name] = finished_result
                 completed_analysis += 1
                 progress_value = analysis_start + (completed_analysis / total_analysis) * analysis_range
                 self._update_progress(metadata, progress_value)
