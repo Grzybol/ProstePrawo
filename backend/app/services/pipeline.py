@@ -191,23 +191,26 @@ class DocumentPipeline:
                 result = await asyncio.to_thread(func, sanitized_text, use_cloud)
                 return name, result
 
-            analysis_tasks = [
+            analysis_tasks: dict[
+                asyncio.Task[tuple[str, tuple[Any, DocumentUsageMetrics]]],
+                str,
+            ] = {
                 asyncio.create_task(
                     _run_analysis("summary", inference.build_summary)
-                ),
+                ): "summary",
                 asyncio.create_task(
                     _run_analysis("obligations", inference.extract_obligations)
-                ),
+                ): "obligations",
                 asyncio.create_task(
                     _run_analysis("penalties", inference.extract_penalties)
-                ),
+                ): "penalties",
                 asyncio.create_task(
                     _run_analysis("deadlines", inference.extract_deadlines)
-                ),
+                ): "deadlines",
                 asyncio.create_task(
                     _run_analysis("risks", inference.extract_risks)
-                ),
-            ]
+                ): "risks",
+            }
 
             analysis_results: dict[str, tuple[Any, DocumentUsageMetrics]] = {}
             total_analysis = len(analysis_tasks) or 1
@@ -216,9 +219,18 @@ class DocumentPipeline:
             analysis_end = 55.0
             analysis_range = analysis_end - analysis_start
 
-            for finished in asyncio.as_completed(analysis_tasks):
-                name, result = await finished
-                analysis_results[name] = result
+            pending: set[asyncio.Task[tuple[str, tuple[Any, DocumentUsageMetrics]]]] = set(
+                analysis_tasks
+            )
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for finished in done:
+                    name = analysis_tasks.pop(finished, None)
+                    if name is None:
+                        continue
+                    analysis_results[name] = await finished
                 completed_analysis += 1
                 progress_value = analysis_start + (completed_analysis / total_analysis) * analysis_range
                 self._update_progress(metadata, progress_value)
