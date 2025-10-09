@@ -40,7 +40,12 @@ async def test_run_parallel_simplify_honours_semaphore():
     metadata = DocumentMetadata(user_id=1, title="Test")
 
     with patch.object(inference, "simplify_sections", side_effect=fake_simplify):
-        simplifications, _ = await pipeline._run_parallel_simplify(metadata, sections, use_cloud=False)
+        simplifications, _ = await pipeline._run_parallel_simplify(
+            metadata,
+            sections,
+            use_cloud=False,
+            progress_callback=lambda _ratio: None,
+        )
 
     assert len(simplifications) == len(sections)
     assert observed <= pipeline.MAX_OPENAI_CONCURRENCY
