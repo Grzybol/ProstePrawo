@@ -46,3 +46,11 @@ export interface SimplifiedResponse {
 export interface QaResponse {
   answer: string;
 }
+
+export interface TemplateGenerationResponse {
+  user_id: number;
+  country: string;
+  prompt: string;
+  template: string;
+  token_usage: TokenUsageMetrics;
+}
