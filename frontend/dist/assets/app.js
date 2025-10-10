@@ -45,7 +45,8 @@ function UploadZone({ onUploadComplete }) {
       try {
         const response = await fetch(`${API_BASE_URL}/documents/`, {
           method: 'POST',
-          body: formData
+          body: formData,
+          credentials: 'include'
         });
         if (!response.ok) {
           const message = await response.text();
@@ -220,7 +221,9 @@ function DashboardPage() {
   const loadDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/documents/`);
+      const response = await fetch(`${API_BASE_URL}/documents/`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         throw new Error('Nie udało się pobrać dokumentów.');
       }
@@ -378,7 +381,9 @@ function QaModal({ documentId, onClose, onHighlightSource }) {
     setAnswer(null);
     try {
       const params = new URLSearchParams({ question });
-      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/qa?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/qa?${params.toString()}`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         throw new Error('Nie udało się pobrać odpowiedzi.');
       }
@@ -483,8 +488,8 @@ function ReaderPage() {
       setError(null);
       try {
         const [metaResponse, simplifiedResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/documents/${documentId}`),
-          fetch(`${API_BASE_URL}/documents/${documentId}/simplified`)
+          fetch(`${API_BASE_URL}/documents/${documentId}`, { credentials: 'include' }),
+          fetch(`${API_BASE_URL}/documents/${documentId}/simplified`, { credentials: 'include' })
         ]);
         if (metaResponse.status === 404) {
           setError('Nie znaleziono dokumentu.');
@@ -659,7 +664,9 @@ function ExportPage() {
         format,
         restore_pii: restorePii ? 'true' : 'false'
       });
-      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/export?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/export?${params.toString()}`, {
+        credentials: 'include'
+      });
       if (!response.ok) {
         const details = await response.text();
         throw new Error(details || 'Nie udało się wygenerować eksportu.');
